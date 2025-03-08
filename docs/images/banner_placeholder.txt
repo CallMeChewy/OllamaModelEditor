@@ -1,0 +1,4 @@
+To complete the setup, you'll need to create a banner image for the project.
+Consider creating a banner with the project name "Ollama Model Editor" and a relevant icon or graphic.
+The recommended size is 1200x300 pixels.
+Save it as "ollama_model_editor_banner.png" in this directory.

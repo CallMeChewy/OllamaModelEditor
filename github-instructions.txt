@@ -1,0 +1,59 @@
+# GitHub Setup Instructions
+
+Here are the steps to set up your GitHub repository:
+
+## 1. Save the setup script
+
+1. Save the `setup_github.sh` script provided in the previous artifact to your project root directory
+2. Make it executable:
+   ```bash
+   chmod +x setup_github.sh
+   ```
+3. Run it:
+   ```bash
+   ./setup_github.sh
+   ```
+
+This script will:
+- Create a `.gitignore` file that excludes your `.venv` directory and `..Exclude` folder
+- Create an enhanced `README.md` with professional structure
+- Add an MIT license file
+- Enhance the `Core/README.md`
+- Create a detailed `QuickStartGuide.md`
+- Add a `docs` directory with additional documentation
+- Create placeholders for images
+
+## 2. Create your GitHub repository
+
+1. Go to [https://github.com/new](https://github.com/new)
+2. Set the repository name to "OllamaModelEditor"
+3. Set it to "Private"
+4. Do NOT initialize it with a README, .gitignore, or license (we've created these locally)
+5. Click "Create repository"
+
+## 3. Push your local project to GitHub
+
+After creating the empty repository, run these commands in your project directory:
+
+```bash
+git init
+git add .
+git commit -m "Initial commit"
+git branch -M main
+git remote add origin https://github.com/CallMeChewy/OllamaModelEditor.git
+git push -u origin main
+```
+
+## 4. Create a banner image
+
+1. Create a banner image with project name "Ollama Model Editor" and a relevant graphic
+2. Recommended size is 1200x300 pixels
+3. Save it as `docs/images/ollama_model_editor_banner.png`
+4. Commit and push this image:
+   ```bash
+   git add docs/images/ollama_model_editor_banner.png
+   git commit -m "Add project banner"
+   git push
+   ```
+
+Your repository is now set up with professional documentation and structure!
