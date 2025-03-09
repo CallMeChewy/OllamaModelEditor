@@ -501,7 +501,8 @@ class ParameterPanel:
             Widgets["original"].config(state=tk.NORMAL)
             Widgets["original"].delete(0, tk.END)
             Widgets["original"].insert(0, OriginalValue if not isinstance(OriginalValue, list) 
-                                      else "; ".join(OriginalValue))
-            Widgets["original"].config(state="readonly")withdraw()
-            self.AddMultiValue(param_name)
-            Dialog.
+                                    else "; ".join(OriginalValue))
+            Widgets["original"].config(state="readonly")
+            # If you need to also withdraw it, do it as a separate statement
+            Widgets["original"].withdraw()
+            self.AddMultiValue(ParamName)  # Changed param_name to ParamName
