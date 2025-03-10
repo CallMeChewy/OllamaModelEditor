@@ -1,25 +1,19 @@
-# Ollama Model Editor Configuration
-
-# UI Settings
-UI:
-  Theme: "light"  # Options: "light", "dark", "system"
-  WindowSize: "1200x900"
-  DefaultFontSize: 10
-  
-# Application Settings
-Application:
-  DefaultModelDir: "~/.ollama/models"
-  LogLevel: "INFO"  # Options: "DEBUG", "INFO", "WARNING", "ERROR"
-  AutoRefreshModels: true
-  
-# AI Advisor Settings
 AIAdvisor:
-  DefaultModel: "llama3"  # Model to use for parameter advice
-  EnableAutoSuggestions: true
   ContextWindow: 4096
-  
-# Parameter Documentation
+  DefaultModel: llama3
+  EnableAutoSuggestions: true
+Application:
+  AutoRefreshModels: true
+  DefaultModelDir: ~/.ollama/models
+  LogLevel: INFO
 ParameterDocs:
   ShowCautions: true
   ShowExamples: true
   ShowPerformanceImpact: true
+State:
+  LastModel: qwq-custom
+  LastWindowSize: 1200x900
+UI:
+  DefaultFontSize: 10
+  Theme: dark
+  WindowSize: 1200x900
