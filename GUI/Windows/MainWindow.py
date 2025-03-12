@@ -17,9 +17,8 @@ from PySide6.QtWidgets import (
     QComboBox, QLabel, QPushButton, QMessageBox,
     QSplitter, QDockWidget
 )
-from PySide6.QtGui import QAction  # QAction is now in QtGui
 from PySide6.QtCore import Qt, QSize, Slot, Signal, QTimer
-from PySide6.QtGui import QIcon, QFont, QKeySequence
+from PySide6.QtGui import QIcon, QFont, QKeySequence, QAction  # QAction moved to QtGui
 
 # Import project modules
 from Core.ConfigManager import ConfigManager
