@@ -1,0 +1,79 @@
+OllamaModelEditor/
+├── .github/
+│   ├── workflows/
+│   │   ├── ci.yml                    # Continuous Integration workflow
+│   │   └── release.yml               # Release automation
+│   ├── ISSUE_TEMPLATE/
+│   │   ├── bug_report.md
+│   │   └── feature_request.md
+│   └── PULL_REQUEST_TEMPLATE.md
+├── .gitignore
+├── Core/
+│   ├── __init__.py
+│   ├── ConfigManager.py              # Configuration management
+│   ├── ModelManager.py               # Ollama model operations
+│   ├── ParameterManager.py           # Model parameter handling
+│   ├── BenchmarkManager.py           # Performance testing
+│   ├── LoggingUtils.py               # Centralized logging
+│   └── README.md                     # Core components documentation
+├── GUI/
+│   ├── __init__.py
+│   ├── Assets/
+│   │   ├── icons/
+│   │   ├── themes/
+│   │   └── fonts/
+│   ├── Components/
+│   │   ├── __init__.py
+│   │   ├── ModelSelector.py          # Model selection widget
+│   │   ├── ParameterEditor.py        # Parameter editing interface
+│   │   ├── BenchmarkView.py          # Performance comparison view
+│   │   └── ConfigExporter.py         # Config export functionality
+│   ├── Dialogs/
+│   │   ├── __init__.py
+│   │   ├── SettingsDialog.py         # Application settings
+│   │   └── AboutDialog.py            # About information
+│   ├── Windows/
+│   │   ├── __init__.py
+│   │   ├── MainWindow.py             # Main application window
+│   │   └── SplashScreen.py           # Application splash screen
+│   └── ThemeManager.py               # Application theming
+├── Tests/
+│   ├── __init__.py
+│   ├── UnitTests/
+│   │   ├── __init__.py
+│   │   ├── TestConfigManager.py
+│   │   ├── TestModelManager.py
+│   │   └── TestParameterManager.py
+│   ├── IntegrationTests/
+│   │   ├── __init__.py
+│   │   └── TestModelWorkflow.py
+│   └── UITests/
+│       ├── __init__.py
+│       └── TestMainWindow.py
+├── Utils/
+│   ├── __init__.py
+│   ├── OllamaUtils.py                # Ollama-specific utilities
+│   ├── ValidationUtils.py            # Input validation helpers
+│   └── FileUtils.py                  # File operations helpers
+├── Features/
+│   ├── __init__.py
+│   ├── ChatIntegration.py            # Chat functionality
+│   ├── SecurityMonitor.py            # Security monitoring
+│   ├── TextToSpeech.py               # TTL functionality
+│   ├── VoiceRecognition.py           # Voice recognition
+│   └── RAGSupport.py                 # Retrieval Augmented Generation
+├── docs/
+│   ├── QuickStartGuide.md            # Getting started guide
+│   ├── parameters.md                 # Parameter reference
+│   ├── advanced_usage.md             # Advanced usage guide
+│   └── screenshots/                  # Application screenshots
+├── scripts/
+│   ├── Setup.sh                      # Environment setup script
+│   ├── Setup.bat                     # Windows setup script
+│   └── UpdateDependencies.py         # Dependency update utility
+├── .env.example                      # Example environment variables
+├── LICENSE                           # MIT License
+├── Main.py                           # Application entry point
+├── README.md                         # Project README
+├── requirements.txt                  # Python dependencies
+└── pyproject.toml                    # Project metadata
