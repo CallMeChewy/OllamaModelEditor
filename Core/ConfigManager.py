@@ -2,7 +2,7 @@
 # Path: OllamaModelEditor/Core/ConfigManager.py
 # Standard: AIDEV-PascalCase-1.2
 # Created: 2025-03-11
-# Last Modified: 2025-03-11
+# Last Modified: 2025-03-12 05:15PM
 # Description: Configuration management for the OllamaModelEditor application
 
 import os
@@ -11,20 +11,25 @@ import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional, Union
 
-# Special terms properly capitalized according to AIDEV-PascalCase standards
-# AI, DB, GUI, API
+# Import DBManager if available
+try:
+    from Core.DBManager import DBManager
+except ImportError:
+    DBManager = None
 
 class ConfigManager:
     """Manages application configuration settings and model parameters."""
     
-    def __init__(self, ConfigPath: Optional[str] = None):
+    def __init__(self, ConfigPath: Optional[str] = None, DB: Optional['DBManager'] = None):
         """
         Initialize the configuration manager.
         
         Args:
             ConfigPath: Optional path to configuration file
+            DB: Optional database manager instance
         """
         self.ConfigPath = ConfigPath
+        self.DB = DB
         self.AppConfig = {}
         self.ModelConfigs = {}
         self.UserPreferences = {}
@@ -61,6 +66,25 @@ class ConfigManager:
         Returns:
             bool: True if configuration loaded successfully, False otherwise
         """
+        # If using database, populate from there
+        if self.DB:
+            try:
+                # Load app config from database
+                self._LoadAppConfigFromDB()
+                
+                # Load user preferences from database
+                self._LoadUserPreferencesFromDB()
+                
+                # Load model configs from database
+                self._LoadModelConfigsFromDB()
+                
+                return True
+            
+            except Exception as Error:
+                print(f"Error loading configuration from database: {Error}")
+                # Fall back to file-based configuration
+        
+        # File-based configuration loading
         try:
             ConfigPath = Path(self.ConfigPath)
             
@@ -93,13 +117,109 @@ class ConfigManager:
             self._CreateDefaultConfig()
             return False
     
+    def _LoadAppConfigFromDB(self) -> None:
+        """Load application configuration from database."""
+        # Get all app settings
+        Settings = self.DB.ExecuteQuery(
+            "SELECT key, value, value_type FROM AppSettings"
+        )
+        
+        # Clear existing app config
+        self.AppConfig = {}
+        
+        # Convert settings to appropriate types and add to AppConfig
+        for Key, Value, ValueType in Settings:
+            if ValueType == "int":
+                self.AppConfig[Key] = int(Value)
+            elif ValueType == "float":
+                self.AppConfig[Key] = float(Value)
+            elif ValueType == "bool":
+                self.AppConfig[Key] = Value.lower() in ("true", "1", "yes")
+            elif ValueType == "json":
+                self.AppConfig[Key] = json.loads(Value)
+            else:
+                self.AppConfig[Key] = Value
+    
+    def _LoadUserPreferencesFromDB(self) -> None:
+        """Load user preferences from database."""
+        # Get all user preferences
+        Preferences = self.DB.ExecuteQuery(
+            "SELECT key, value, value_type FROM UserPreferences"
+        )
+        
+        # Clear existing preferences
+        self.UserPreferences = {}
+        
+        # Convert preferences to appropriate types and add to UserPreferences
+        for Key, Value, ValueType in Preferences:
+            if ValueType == "int":
+                self.UserPreferences[Key] = int(Value)
+            elif ValueType == "float":
+                self.UserPreferences[Key] = float(Value)
+            elif ValueType == "bool":
+                self.UserPreferences[Key] = Value.lower() in ("true", "1", "yes")
+            elif ValueType == "json":
+                self.UserPreferences[Key] = json.loads(Value)
+            else:
+                self.UserPreferences[Key] = Value
+    
+    def _LoadModelConfigsFromDB(self) -> None:
+        """Load model configurations from database."""
+        # Get all model configurations
+        ModelConfigs = self.DB.ExecuteQuery(
+            """
+            SELECT model_name, config_name, temperature, top_p, max_tokens,
+                   frequency_penalty, presence_penalty
+            FROM ModelConfigs
+            """
+        )
+        
+        # Clear existing model configs
+        self.ModelConfigs = {}
+        
+        # Group configurations by model
+        for ModelName, ConfigName, Temperature, TopP, MaxTokens, FrequencyPenalty, PresencePenalty in ModelConfigs:
+            # Create model entry if it doesn't exist
+            if ModelName not in self.ModelConfigs:
+                self.ModelConfigs[ModelName] = {}
+            
+            # Add configuration
+            self.ModelConfigs[ModelName][ConfigName] = {
+                'Temperature': Temperature,
+                'TopP': TopP,
+                'MaxTokens': MaxTokens,
+                'FrequencyPenalty': FrequencyPenalty,
+                'PresencePenalty': PresencePenalty
+            }
+    
     def SaveConfig(self) -> bool:
         """
-        Save current configuration to file.
+        Save current configuration to file or database.
         
         Returns:
             bool: True if configuration saved successfully, False otherwise
         """
+        # If using database, save there
+        if self.DB:
+            try:
+                # Save app config to database
+                for Key, Value in self.AppConfig.items():
+                    self.DB.SetAppSetting(Key, Value)
+                
+                # Save user preferences to database
+                for Key, Value in self.UserPreferences.items():
+                    self.DB.SetUserPreference(Key, Value)
+                
+                # Save model configs to database (handled by ModelManager)
+                # We don't save model configs here to avoid overwriting changes
+                
+                return True
+            
+            except Exception as Error:
+                print(f"Error saving configuration to database: {Error}")
+                # Fall back to file-based saving
+        
+        # File-based configuration saving
         try:
             ConfigPath = Path(self.ConfigPath)
             
@@ -162,7 +282,20 @@ class ConfigManager:
         }
         
         # Save default configuration
-        self.SaveConfig()
+        if self.DB:
+            # Save to database
+            for Key, Value in self.AppConfig.items():
+                self.DB.SetAppSetting(Key, Value)
+            
+            for Key, Value in self.UserPreferences.items():
+                self.DB.SetUserPreference(Key, Value)
+            
+            # Save default parameters
+            DefaultParams = self.ModelConfigs['DefaultParameters']
+            self.DB.SaveModelConfig('DefaultParameters', 'Default', DefaultParams)
+        else:
+            # Save to file
+            self.SaveConfig()
     
     def GetAppConfig(self, Key: Optional[str] = None, Default: Any = None) -> Any:
         """
@@ -175,6 +308,13 @@ class ConfigManager:
         Returns:
             Configuration value or entire configuration dictionary
         """
+        if self.DB and Key:
+            # Try to get from database first
+            Value = self.DB.GetAppSetting(Key, None)
+            if Value is not None:
+                return Value
+        
+        # Fall back to memory cache
         if Key:
             return self.AppConfig.get(Key, Default)
         return self.AppConfig
@@ -188,6 +328,10 @@ class ConfigManager:
             Value: Configuration value
         """
         self.AppConfig[Key] = Value
+        
+        # Save to database if available
+        if self.DB:
+            self.DB.SetAppSetting(Key, Value)
     
     def GetModelConfig(self, ModelName: str) -> Dict[str, Any]:
         """
@@ -199,6 +343,19 @@ class ConfigManager:
         Returns:
             Dict: Model configuration
         """
+        if self.DB:
+            # Try to get from database first
+            Config = self.DB.GetModelConfig(ModelName)
+            if Config:
+                return {
+                    'Temperature': Config['temperature'],
+                    'TopP': Config['top_p'],
+                    'MaxTokens': Config['max_tokens'],
+                    'FrequencyPenalty': Config['frequency_penalty'],
+                    'PresencePenalty': Config['presence_penalty']
+                }
+        
+        # Fall back to memory cache
         return self.ModelConfigs.get(ModelName, self.ModelConfigs.get('DefaultParameters', {}))
     
     def SetModelConfig(self, ModelName: str, Config: Dict[str, Any]) -> None:
@@ -210,6 +367,10 @@ class ConfigManager:
             Config: Model configuration
         """
         self.ModelConfigs[ModelName] = Config
+        
+        # Save to database if available
+        if self.DB:
+            self.DB.SaveModelConfig(ModelName, 'Default', Config)
     
     def GetUserPreference(self, Key: str, Default: Any = None) -> Any:
         """
@@ -222,6 +383,13 @@ class ConfigManager:
         Returns:
             User preference value
         """
+        if self.DB:
+            # Try to get from database first
+            Value = self.DB.GetUserPreference(Key, None)
+            if Value is not None:
+                return Value
+        
+        # Fall back to memory cache
         return self.UserPreferences.get(Key, Default)
     
     def SetUserPreference(self, Key: str, Value: Any) -> None:
@@ -233,6 +401,10 @@ class ConfigManager:
             Value: Preference value
         """
         self.UserPreferences[Key] = Value
+        
+        # Save to database if available
+        if self.DB:
+            self.DB.SetUserPreference(Key, Value)
     
     def AddRecentModel(self, ModelName: str) -> None:
         """
@@ -379,3 +551,52 @@ class ConfigManager:
             return False
         
         return True
+    
+    def MigrateToDatabase(self, DB: 'DBManager') -> bool:
+        """
+        Migrate file-based configuration to database.
+        
+        Args:
+            DB: Database manager instance
+            
+        Returns:
+            bool: True if migration successful, False otherwise
+        """
+        if not DB:
+            print("No database manager provided")
+            return False
+        
+        try:
+            # Make sure configuration is loaded
+            self.LoadConfig()
+            
+            # Set database reference
+            self.DB = DB
+            
+            # Migrate application settings
+            print("Migrating application settings...")
+            for Key, Value in self.AppConfig.items():
+                DB.SetAppSetting(Key, Value)
+            
+            # Migrate user preferences
+            print("Migrating user preferences...")
+            for Key, Value in self.UserPreferences.items():
+                DB.SetUserPreference(Key, Value)
+            
+            # Migrate model configurations
+            print("Migrating model configurations...")
+            for ModelName, ModelConfig in self.ModelConfigs.items():
+                if isinstance(ModelConfig, dict) and not isinstance(list(ModelConfig.values())[0], dict):
+                    # This is a single configuration (not a dict of configs)
+                    DB.SaveModelConfig(ModelName, "Default", ModelConfig)
+                else:
+                    # This is a dict of configurations
+                    for ConfigName, ConfigParams in ModelConfig.items():
+                        DB.SaveModelConfig(ModelName, ConfigName, ConfigParams)
+            
+            print("Migration to database completed successfully")
+            return True
+            
+        except Exception as Error:
+            print(f"Error migrating to database: {Error}")
+            return False

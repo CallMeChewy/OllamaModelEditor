@@ -2,11 +2,11 @@
 # Path: OllamaModelEditor/GUI/Windows/SplashScreen.py
 # Standard: AIDEV-PascalCase-1.2
 # Created: 2025-03-11
-# Last Modified: 2025-03-11
+# Last Modified: 2025-03-12
 # Description: Splash screen for the OllamaModelEditor application
 
-from PySide6.QtWidgets import QSplashScreen, QVBoxLayout, QLabel, QProgressBar, QWidget
-from PySide6.QtCore import Qt, QSize, QTimer
+from PySide6.QtWidgets import QSplashScreen
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap, QFont, QColor, QPainter
 
 class SplashScreen(QSplashScreen):
@@ -15,15 +15,11 @@ class SplashScreen(QSplashScreen):
     def __init__(self):
         """Initialize the splash screen."""
         # Create a pixmap for the splash screen
-        Pixmap = QPixmap(QSize(600, 400))
-        Pixmap.fill(Qt.white)
+        self.BasePixmap = QPixmap(600, 400)
+        self.BasePixmap.fill(Qt.white)
         
-        super().__init__(Pixmap)
-        
-        # Create a painter to draw on the pixmap
-        Painter = QPainter(self.pixmap())
-        self._DrawContent(Painter)
-        Painter.end()
+        # Initialize with the base pixmap
+        super().__init__(self.BasePixmap)
         
         # Set window flags
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
@@ -32,18 +28,22 @@ class SplashScreen(QSplashScreen):
         self.Progress = 0
         self.ProgressMax = 100
         
+        # Draw initial content
+        self._DrawContent()
+        
         # Start progress timer
         self.ProgressTimer = QTimer(self)
         self.ProgressTimer.timeout.connect(self._UpdateProgress)
-        self.ProgressTimer.start(30)
+        self.ProgressTimer.start(50)
     
-    def _DrawContent(self, Painter):
-        """
-        Draw splash screen content.
+    def _DrawContent(self):
+        """Draw splash screen content."""
+        # Create a new pixmap based on the base pixmap for drawing
+        CurrentPixmap = QPixmap(self.BasePixmap)
         
-        Args:
-            Painter: QPainter instance to draw with
-        """
+        # Create painter for the current pixmap
+        Painter = QPainter(CurrentPixmap)
+        
         # Draw application name
         Painter.setPen(QColor(40, 40, 40))
         TitleFont = QFont("Arial", 28, QFont.Bold)
@@ -71,29 +71,12 @@ class SplashScreen(QSplashScreen):
         Painter.setPen(QColor(200, 200, 200))
         Painter.setBrush(Qt.white)
         Painter.drawRect(50, 250, 500, 30)
-    
-    def _UpdateProgress(self):
-        """Update progress bar display."""
-        if self.Progress >= self.ProgressMax:
-            self.ProgressTimer.stop()
-            return
         
-        # Increase progress
-        self.Progress += 2
-        
-        # Update progress bar
-        Painter = QPainter(self.pixmap())
+        # Draw progress bar
+        ProgressWidth = int(500 * (self.Progress / self.ProgressMax))
         Painter.setPen(Qt.NoPen)
         Painter.setBrush(QColor(0, 120, 212))
-        
-        # Calculate progress width
-        ProgressWidth = int(500 * (self.Progress / self.ProgressMax))
         Painter.drawRect(50, 250, ProgressWidth, 30)
-        
-        # Draw status text
-        Painter.setPen(QColor(40, 40, 40))
-        StatusFont = QFont("Arial", 10)
-        Painter.setFont(StatusFont)
         
         # Determine status message based on progress
         StatusMessage = "Initializing..."
@@ -106,11 +89,29 @@ class SplashScreen(QSplashScreen):
         if self.Progress > 80:
             StatusMessage = "Preparing UI components..."
         
+        # Draw status text
+        Painter.setPen(QColor(40, 40, 40))
+        StatusFont = QFont("Arial", 10)
+        Painter.setFont(StatusFont)
         Painter.drawText(50, 220, StatusMessage)
+        
+        # End painting
         Painter.end()
         
+        # Set the updated pixmap to the splash screen
+        self.setPixmap(CurrentPixmap)
+    
+    def _UpdateProgress(self):
+        """Update progress bar display."""
+        if self.Progress >= self.ProgressMax:
+            self.ProgressTimer.stop()
+            return
+        
+        # Increase progress
+        self.Progress += 2
+        
         # Update display
-        self.repaint()
+        self._DrawContent()
     
     def mousePressEvent(self, event):
         """
