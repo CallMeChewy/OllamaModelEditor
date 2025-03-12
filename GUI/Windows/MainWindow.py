@@ -12,11 +12,12 @@ from typing import Optional, Dict, Any
 
 # Import PySide6 components
 from PySide6.QtWidgets import (
-    QMainWindow, QAction, QMenu, QToolBar, QStatusBar, 
+    QMainWindow, QMenu, QToolBar, QStatusBar, 
     QVBoxLayout, QHBoxLayout, QWidget, QTabWidget,
     QComboBox, QLabel, QPushButton, QMessageBox,
     QSplitter, QDockWidget
 )
+from PySide6.QtGui import QAction  # QAction is now in QtGui
 from PySide6.QtCore import Qt, QSize, Slot, Signal, QTimer
 from PySide6.QtGui import QIcon, QFont, QKeySequence
 
