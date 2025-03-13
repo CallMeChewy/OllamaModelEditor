@@ -58,6 +58,19 @@ Core/
   DBManager.py
   LoggingUtils.py
   ModelManager.py
+  ModelManagerExtensions.py
+  ParameterStateManager.py
+CurrentMods/
+  old/
+    OllamaModelEditor Implementation Plan.md
+  Benchmark Methodology Documentation.md
+  BenchmarkView.py
+  Main.py
+  mainwindow-update.py
+  OllamaModelEditor Implementation Updates.md
+  ParameterEditor.py
+  ParameterStateManager.py
+  StateManager Integration Guide.md
 docs/
   Notes/
     Additional Features from Original Design and Brainstorming.md
@@ -66,7 +79,10 @@ docs/
     Database Migration to PascalCase Standard.md
     implementation-plan.md
     OllamaModelEditor - Database Integration Guide.md
+    OllamaModelEditor - Project Status and Roadmap.md
+    OllamaModelEditor Database Integration Guide.md
     OllamaModelEditor UI and Feature Implementation Plan.md
+  parameter-editor.py
   ProjectStructure.txt
 GUI/
   Components/
@@ -81,6 +97,7 @@ scripts/
   GithubUpdate.sh
   MigrateDBToPascalCase.py
   MigrateToDatabase.py
+  rename_report.py
   Setup.bat
   Setup.sh
   SimpleGitHubSetup.sh
@@ -93,6 +110,7 @@ Tests/
 LICENSE
 Main.py
 README.md
+rename_report.sh
 requirements.txt
 SimpleTest.py
 
@@ -216,14 +234,14 @@ File: Core/ConfigManager.py
 # Path: OllamaModelEditor/Core/ConfigManager.py
 # Standard: AIDEV-PascalCase-1.2
 # Created: 2025-03-11
-# Last Modified: 2025-03-12 09:30PM
+# Last Modified: 2025-03-13
 # Description: Configuration management for the OllamaModelEditor application
 
 import os
 import json
 import yaml
 from pathlib import Path
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, List
 import logging
 
 # Import DBManager if available
@@ -275,6 +293,89 @@ class ConfigManager:
         
         return str(ConfigDir / 'Config.yaml')
     
+    def _SerializeQtObjects(self, Config: Dict) -> Dict:
+        """
+        Convert Qt objects to serializable format.
+        
+        Args:
+            Config: Configuration dictionary
+            
+        Returns:
+            Dictionary with serialized Qt objects
+        """
+        SerializedConfig = {}
+        
+        for Key, Value in Config.items():
+            if hasattr(Value, '__class__') and Value.__class__.__module__.startswith('PySide6'):
+                # Handle QByteArray
+                if Value.__class__.__name__ == 'QByteArray':
+                    SerializedConfig[Key] = {'__qt_type__': 'QByteArray', 'data': bytes(Value).hex()}
+                # Handle QSize
+                elif Value.__class__.__name__ == 'QSize':
+                    SerializedConfig[Key] = {'__qt_type__': 'QSize', 'width': Value.width(), 'height': Value.height()}
+                # Handle QRect
+                elif Value.__class__.__name__ == 'QRect':
+                    SerializedConfig[Key] = {
+                        '__qt_type__': 'QRect', 
+                        'x': Value.x(), 
+                        'y': Value.y(),
+                        'width': Value.width(), 
+                        'height': Value.height()
+                    }
+                # Handle QPoint
+                elif Value.__class__.__name__ == 'QPoint':
+                    SerializedConfig[Key] = {'__qt_type__': 'QPoint', 'x': Value.x(), 'y': Value.y()}
+                # Other Qt objects - store class name and basic representation
+                else:
+                    SerializedConfig[Key] = {
+                        '__qt_type__': Value.__class__.__name__,
+                        'repr': repr(Value)
+                    }
+            elif isinstance(Value, dict):
+                SerializedConfig[Key] = self._SerializeQtObjects(Value)
+            else:
+                SerializedConfig[Key] = Value
+                
+        return SerializedConfig
+    
+    def _DeserializeQtObjects(self, Config: Dict) -> Dict:
+        """
+        Convert serialized Qt objects back to their original form.
+        
+        Args:
+            Config: Configuration dictionary with serialized Qt objects
+            
+        Returns:
+            Dictionary with deserialized Qt objects
+        """
+        from PySide6.QtCore import QByteArray, QSize, QRect, QPoint
+        
+        DeserializedConfig = {}
+        
+        for Key, Value in Config.items():
+            if isinstance(Value, dict) and '__qt_type__' in Value:
+                # Reconstruct Qt objects based on type
+                QtType = Value['__qt_type__']
+                
+                if QtType == 'QByteArray':
+                    DeserializedConfig[Key] = QByteArray.fromHex(bytes.fromhex(Value['data']))
+                elif QtType == 'QSize':
+                    DeserializedConfig[Key] = QSize(Value['width'], Value['height'])
+                elif QtType == 'QRect':
+                    DeserializedConfig[Key] = QRect(Value['x'], Value['y'], Value['width'], Value['height'])
+                elif QtType == 'QPoint':
+                    DeserializedConfig[Key] = QPoint(Value['x'], Value['y'])
+                else:
+                    # For other Qt objects, we can't fully reconstruct them
+                    # So we'll keep them as dictionaries with their type information
+                    DeserializedConfig[Key] = Value
+            elif isinstance(Value, dict):
+                DeserializedConfig[Key] = self._DeserializeQtObjects(Value)
+            else:
+                DeserializedConfig[Key] = Value
+                
+        return DeserializedConfig
+    
     def LoadConfig(self) -> bool:
         """
         Load configuration from file.
@@ -322,9 +423,14 @@ class ConfigManager:
                 return False
             
             # Parse configuration sections
-            self.AppConfig = ConfigData.get('AppConfig', {})
-            self.ModelConfigs = ConfigData.get('ModelConfigs', {})
-            self.UserPreferences = ConfigData.get('UserPreferences', {})
+            if 'AppConfig' in ConfigData:
+                self.AppConfig = self._DeserializeQtObjects(ConfigData.get('AppConfig', {}))
+            
+            if 'ModelConfigs' in ConfigData:
+                self.ModelConfigs = self._DeserializeQtObjects(ConfigData.get('ModelConfigs', {}))
+            
+            if 'UserPreferences' in ConfigData:
+                self.UserPreferences = self._DeserializeQtObjects(ConfigData.get('UserPreferences', {}))
             
             self.Logger.info(f"Configuration loaded from file: {ConfigPath}")
             return True
@@ -444,9 +550,9 @@ class ConfigManager:
             
             # Prepare configuration data
             ConfigData = {
-                'AppConfig': self.AppConfig,
-                'ModelConfigs': self.ModelConfigs,
-                'UserPreferences': self.UserPreferences
+                'AppConfig': self._SerializeQtObjects(self.AppConfig),
+                'ModelConfigs': self._SerializeQtObjects(self.ModelConfigs),
+                'UserPreferences': self._SerializeQtObjects(self.UserPreferences)
             }
             
             # Create directory if it doesn't exist
@@ -3078,6 +3184,2583 @@ class ModelManager:
         return False
 
 ================
+File: Core/ModelManagerExtensions.py
+================
+# File: ModelManagerExtensions.py
+# Path: OllamaModelEditor/Core/ModelManagerExtensions.py
+# Standard: AIDEV-PascalCase-1.2
+# Created: 2025-03-13
+# Last Modified: 2025-03-13
+# Description: Extensions for ModelManager to support preset handling
+
+from typing import Dict, List, Any, Optional
+
+# These methods should be added to the ModelManager class
+
+def GetPresetParameters(self, PresetName: str) -> Dict[str, Any]:
+    """
+    Get parameters for a preset.
+    
+    Args:
+        PresetName: Name of the preset
+        
+    Returns:
+        Dict containing preset parameters or empty dict if not found
+    """
+    # Define built-in presets
+    BuiltInPresets = {
+        "Default": {
+            'Temperature': 0.7,
+            'TopP': 0.9,
+            'MaxTokens': 2048,
+            'FrequencyPenalty': 0.0,
+            'PresencePenalty': 0.0
+        },
+        "Creative": {
+            'Temperature': 1.0,
+            'TopP': 0.95,
+            'MaxTokens': 4096,
+            'FrequencyPenalty': 0.0,
+            'PresencePenalty': 0.0
+        },
+        "Precise": {
+            'Temperature': 0.3,
+            'TopP': 0.7,
+            'MaxTokens': 2048,
+            'FrequencyPenalty': 0.5,
+            'PresencePenalty': 0.0
+        },
+        "Fast": {
+            'Temperature': 0.7,
+            'TopP': 0.9,
+            'MaxTokens': 1024,
+            'FrequencyPenalty': 0.0,
+            'PresencePenalty': 0.0
+        },
+        "Balanced": {
+            'Temperature': 0.6,
+            'TopP': 0.85,
+            'MaxTokens': 2048,
+            'FrequencyPenalty': 0.3,
+            'PresencePenalty': 0.3
+        }
+    }
+    
+    # Check if preset is a built-in preset
+    if PresetName in BuiltInPresets:
+        return BuiltInPresets[PresetName]
+    
+    # If using database, try to get from database
+    if self.DB:
+        # Try to get from database
+        Preset = self.DB.GetPreset(PresetName)
+        if Preset:
+            return {
+                'Temperature': Preset['Temperature'],
+                'TopP': Preset['TopP'],
+                'MaxTokens': Preset['MaxTokens'],
+                'FrequencyPenalty': Preset['FrequencyPenalty'],
+                'PresencePenalty': Preset['PresencePenalty']
+            }
+        
+        # Try to get from user presets
+        UserPreset = self.DB.GetUserPreset(PresetName)
+        if UserPreset:
+            return {
+                'Temperature': UserPreset['Temperature'],
+                'TopP': UserPreset['TopP'],
+                'MaxTokens': UserPreset['MaxTokens'],
+                'FrequencyPenalty': UserPreset['FrequencyPenalty'],
+                'PresencePenalty': UserPreset['PresencePenalty']
+            }
+    
+    # Return default parameters if preset not found
+    return self.Config.GetModelConfig('DefaultParameters')
+
+def GetAllPresets(self) -> List[Dict[str, Any]]:
+    """
+    Get all available presets.
+    
+    Returns:
+        List of dictionaries containing preset information
+    """
+    Presets = []
+    
+    # Add built-in presets
+    BuiltInPresets = [
+        {
+            'Name': 'Default',
+            'Description': 'Balanced settings suitable for most tasks.',
+            'IsBuiltIn': True
+        },
+        {
+            'Name': 'Creative',
+            'Description': 'Higher temperature and diversity for more creative, varied outputs.',
+            'IsBuiltIn': True
+        },
+        {
+            'Name': 'Precise',
+            'Description': 'Lower temperature for more focused, deterministic responses.',
+            'IsBuiltIn': True
+        },
+        {
+            'Name': 'Fast',
+            'Description': 'Optimized for speed with shorter outputs.',
+            'IsBuiltIn': True
+        },
+        {
+            'Name': 'Balanced',
+            'Description': 'Moderate settings with some repetition control for well-rounded responses.',
+            'IsBuiltIn': True
+        }
+    ]
+    
+    Presets.extend(BuiltInPresets)
+    
+    # If using database, add presets from database
+    if self.DB:
+        # Get presets from database
+        DBPresets = self.DB.GetPresets()
+        for Preset in DBPresets:
+            Presets.append({
+                'Name': Preset.get('Name', 'Unknown'),
+                'Description': Preset.get('Description', ''),
+                'IsBuiltIn': False
+            })
+        
+        # Get user presets from database
+        UserPresets = self.DB.GetUserPresets()
+        for Preset in UserPresets:
+            Presets.append({
+                'Name': Preset.get('Name', 'Unknown'),
+                'Description': Preset.get('Description', ''),
+                'IsBuiltIn': False,
+                'IsUserPreset': True
+            })
+    
+    return Presets
+
+def ApplyPresetToModel(self, ModelName: str, PresetName: str) -> bool:
+    """
+    Apply a preset to a model.
+    
+    Args:
+        ModelName: Name of the model
+        PresetName: Name of the preset
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    # Get preset parameters
+    PresetParams = self.GetPresetParameters(PresetName)
+    
+    if not PresetParams:
+        self.Logger.error(f"Preset not found: {PresetName}")
+        return False
+    
+    # Update model parameters
+    Success = self.UpdateModelParameters(ModelName, PresetParams)
+    
+    if Success:
+        self.Logger.info(f"Applied preset '{PresetName}' to model '{ModelName}'")
+    
+    return Success
+
+def SaveUserPreset(self, PresetName: str, Description: str, Parameters: Dict[str, Any]) -> bool:
+    """
+    Save a user preset.
+    
+    Args:
+        PresetName: Name of the preset
+        Description: Description of the preset
+        Parameters: Parameter values for the preset
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    # Validate parameters
+    if not self._ValidateParameters(Parameters):
+        self.Logger.error("Invalid parameters for preset")
+        return False
+    
+    # Save to database if available
+    if self.DB:
+        try:
+            self.DB.SaveUserPreset(PresetName, Description, Parameters)
+            self.Logger.info(f"User preset '{PresetName}' saved")
+            return True
+        except Exception as Error:
+            self.Logger.error(f"Error saving user preset: {Error}")
+            return False
+    else:
+        self.Logger.error("Database not available, cannot save user preset")
+        return False
+
+def DeleteUserPreset(self, PresetName: str) -> bool:
+    """
+    Delete a user preset.
+    
+    Args:
+        PresetName: Name of the preset
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    # Delete from database if available
+    if self.DB:
+        try:
+            Result = self.DB.DeleteUserPreset(PresetName)
+            if Result:
+                self.Logger.info(f"User preset '{PresetName}' deleted")
+            else:
+                self.Logger.warning(f"User preset '{PresetName}' not found")
+            return Result
+        except Exception as Error:
+            self.Logger.error(f"Error deleting user preset: {Error}")
+            return False
+    else:
+        self.Logger.error("Database not available, cannot delete user preset")
+        return False
+
+================
+File: Core/ParameterStateManager.py
+================
+# File: ParameterStateManager.py
+# Path: OllamaModelEditor/Core/ParameterStateManager.py
+# Standard: AIDEV-PascalCase-1.2
+# Created: 2025-03-13
+# Last Modified: 2025-03-13
+# Description: Manages parameter state tracking for the OllamaModelEditor application
+
+from typing import Dict, Any, Optional, List, Tuple
+import logging
+import json
+import copy
+from pathlib import Path
+
+class ParameterStateManager:
+    """Manages and tracks parameter states for models."""
+    
+    def __init__(self, ModelManager, ConfigManager):
+        """
+        Initialize the parameter state manager.
+        
+        Args:
+            ModelManager: Model manager instance
+            ConfigManager: Configuration manager instance
+        """
+        self.Logger = logging.getLogger('OllamaModelEditor.ParameterStateManager')
+        self.ModelManager = ModelManager
+        self.ConfigManager = ConfigManager
+        
+        # Store original and current parameter states
+        self.OriginalStates = {}  # ModelName -> Original parameters
+        self.CurrentStates = {}   # ModelName -> Current parameters
+        
+        # Store model file contents (if available)
+        self.ModelFiles = {}      # ModelName -> Model file content
+    
+    def LoadModelState(self, ModelName: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """
+        Load and track the state for a model.
+        
+        Args:
+            ModelName: Name of the model
+            
+        Returns:
+            Tuple of (original state, current state)
+        """
+        # Get model details
+        ModelDetails = self.ModelManager.GetModelDetails(ModelName)
+        
+        # Get model parameters from configuration
+        ModelParams = self.ConfigManager.GetModelConfig(ModelName)
+        
+        # Store original state if not already stored
+        if ModelName not in self.OriginalStates:
+            self.OriginalStates[ModelName] = copy.deepcopy(ModelParams)
+        
+        # Update current state
+        self.CurrentStates[ModelName] = copy.deepcopy(ModelParams)
+        
+        # Attempt to load model file content if available
+        self._LoadModelFile(ModelName)
+        
+        return (self.OriginalStates[ModelName], self.CurrentStates[ModelName])
+    
+    def _LoadModelFile(self, ModelName: str) -> None:
+        """
+        Attempt to load the model file content.
+        
+        Args:
+            ModelName: Name of the model
+        """
+        try:
+            # Look for model file in standard Ollama locations
+            HomeDir = Path.home()
+            OllamaDir = HomeDir / '.ollama'
+            
+            # Check for model file in models directory
+            ModelFile = OllamaDir / 'models' / f"{ModelName}.json"
+            if not ModelFile.exists():
+                # Try alternative path format
+                ModelName = ModelName.replace(':', '_')
+                ModelFile = OllamaDir / 'models' / f"{ModelName}.json"
+            
+            if ModelFile.exists():
+                with open(ModelFile, 'r') as f:
+                    self.ModelFiles[ModelName] = json.load(f)
+                    self.Logger.info(f"Loaded model file for {ModelName}")
+            else:
+                self.Logger.info(f"Model file not found for {ModelName}")
+        except Exception as Error:
+            self.Logger.error(f"Error loading model file for {ModelName}: {Error}")
+    
+    def UpdateCurrentState(self, ModelName: str, Parameters: Dict[str, Any]) -> None:
+        """
+        Update the current state for a model.
+        
+        Args:
+            ModelName: Name of the model
+            Parameters: Updated parameters
+        """
+        # Ensure model state is loaded
+        if ModelName not in self.CurrentStates:
+            self.LoadModelState(ModelName)
+        
+        # Update current state
+        self.CurrentStates[ModelName].update(Parameters)
+    
+    def GetStateDifferences(self, ModelName: str) -> Dict[str, Tuple[Any, Any]]:
+        """
+        Get differences between original and current states.
+        
+        Args:
+            ModelName: Name of the model
+            
+        Returns:
+            Dictionary mapping parameter names to (original, current) value tuples
+        """
+        if ModelName not in self.OriginalStates or ModelName not in self.CurrentStates:
+            return {}
+        
+        Differences = {}
+        Original = self.OriginalStates[ModelName]
+        Current = self.CurrentStates[ModelName]
+        
+        # Find all parameter keys from both states
+        AllParams = set(Original.keys()) | set(Current.keys())
+        
+        for Param in AllParams:
+            OrigValue = Original.get(Param)
+            CurrValue = Current.get(Param)
+            
+            if OrigValue != CurrValue:
+                Differences[Param] = (OrigValue, CurrValue)
+        
+        return Differences
+    
+    def GetModelFile(self, ModelName: str) -> Optional[Dict[str, Any]]:
+        """
+        Get the model file content if available.
+        
+        Args:
+            ModelName: Name of the model
+            
+        Returns:
+            Dictionary containing model file content or None if not available
+        """
+        return self.ModelFiles.get(ModelName)
+    
+    def GetAllModelParameters(self, ModelName: str) -> Dict[str, Any]:
+        """
+        Get all available parameters for a model.
+        
+        Args:
+            ModelName: Name of the model
+            
+        Returns:
+            Dictionary containing all available parameters
+        """
+        # Start with current state parameters
+        AllParams = copy.deepcopy(self.CurrentStates.get(ModelName, {}))
+        
+        # Add parameters from model file if available
+        ModelFile = self.GetModelFile(ModelName)
+        if ModelFile and 'parameters' in ModelFile:
+            # Get parameters from model file
+            FileParams = ModelFile.get('parameters', {})
+            
+            # Add missing parameters
+            for Param, Value in FileParams.items():
+                if Param not in AllParams:
+                    AllParams[Param] = Value
+        
+        return AllParams
+    
+    def ResetToOriginal(self, ModelName: str) -> Dict[str, Any]:
+        """
+        Reset current state to original state.
+        
+        Args:
+            ModelName: Name of the model
+            
+        Returns:
+            Dictionary containing original parameters
+        """
+        if ModelName in self.OriginalStates:
+            self.CurrentStates[ModelName] = copy.deepcopy(self.OriginalStates[ModelName])
+            return self.CurrentStates[ModelName]
+        return {}
+    
+    def CommitCurrentState(self, ModelName: str) -> bool:
+        """
+        Commit current state as the new original state.
+        
+        Args:
+            ModelName: Name of the model
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if ModelName in self.CurrentStates:
+            # Save current state to configuration
+            self.ConfigManager.SetModelConfig(ModelName, self.CurrentStates[ModelName])
+            
+            # Update original state
+            self.OriginalStates[ModelName] = copy.deepcopy(self.CurrentStates[ModelName])
+            
+            self.Logger.info(f"Committed current state for {ModelName}")
+            return True
+        
+        self.Logger.error(f"Cannot commit state for {ModelName}: no current state")
+        return False
+
+================
+File: CurrentMods/old/OllamaModelEditor Implementation Plan.md
+================
+# OllamaModelEditor Implementation Plan
+
+Based on the review of the OllamaModelEditor code and the enhancements we've made, this document outlines the steps for implementing the improvements and the future roadmap for the project.
+
+## 1. Current Status
+
+The application currently has:
+- A functional UI for viewing and editing model parameters
+- Database integration for storing configurations
+- Basic benchmarking functionality
+- Parameter descriptions and preset management
+
+## 2. Immediate Implementation Plan
+
+### 2.1. Fix Configuration Loading Issue
+
+**Issue**: QByteArray serialization in YAML is causing configuration loading errors.
+
+**Implementation**:
+1. Add the `_SerializeQtObjects` and `_DeserializeQtObjects` methods to `ConfigManager.py`
+2. Update the `SaveConfig` method to use these serialization methods
+3. Update the `LoadConfig` method to use these deserialization methods
+
+**Files to Update**:
+- `Core/ConfigManager.py`
+
+### 2.2. Enhance Parameter Editor
+
+**Implementation**:
+1. Add parameter description display when parameters are selected
+2. Implement preset management functionality
+3. Add apply and reset buttons
+4. Organize parameters into basic and advanced sections
+
+**Files to Update**:
+- `GUI/Components/ParameterEditor.py`
+
+### 2.3. Improve Benchmark View
+
+**Implementation**:
+1. Create proper benchmark configuration UI
+2. Implement configuration comparison functionality
+3. Add benchmark visualization
+4. Implement benchmark result export
+
+**Files to Update**:
+- `GUI/Components/BenchmarkView.py`
+
+### 2.4. Extend Model Manager
+
+**Implementation**:
+1. Add preset management methods to `ModelManager.py`
+2. Implement methods to get and apply preset parameters
+3. Add support for user-defined presets
+
+**Files to Update**:
+- `Core/ModelManager.py`
+
+## 3. Integration Plan
+
+1. Incorporate all component changes into the main application
+2. Ensure consistent interaction between components
+3. Test the application with the new features
+4. Verify database integration works correctly
+
+## 4. Testing Plan
+
+### 4.1. Unit Testing
+
+1. Test configuration serialization/deserialization
+2. Test parameter editor interactions
+3. Test benchmark functionality
+4. Test preset management
+
+### 4.2. Integration Testing
+
+1. Test end-to-end workflows
+2. Verify database operations
+3. Test compatibility with different Ollama models
+
+### 4.3. User Interface Testing
+
+1. Verify UI looks and functions correctly
+2. Test response to user inputs
+3. Verify error handling
+
+## 5. Future Roadmap
+
+### 5.1. Short-Term (Next 1-2 Weeks)
+
+1. **Enhanced Visualization**
+   - Add proper charting with a library like matplotlib or QChart
+   - Provide more visual feedback for parameter adjustments
+
+2. **Advanced Analysis**
+   - Add token usage visualization
+   - Implement response analysis tools
+   - Add parameter impact visualization
+
+3. **User Experience Improvements**
+   - Improve error handling and user feedback
+   - Add tooltips and help text
+   - Implement keyboard shortcuts
+
+### 5.2. Medium-Term (Next 1-2 Months)
+
+1. **Generation History**
+   - Implement comprehensive history tracking
+   - Add filtering and search capabilities
+   - Provide export functionality
+
+2. **Advanced Benchmarking**
+   - Add standardized benchmark templates
+   - Implement multi-model comparison
+   - Add statistical analysis of results
+
+3. **Configuration Management**
+   - Add version control for configurations
+   - Implement configuration sharing capabilities
+   - Add import/export functionality
+
+### 5.3. Long-Term (3+ Months)
+
+1. **Integration with Ollama Ecosystem**
+   - Add support for model management
+   - Implement model download/update functionality
+   - Add integration with other Ollama tools
+
+2. **Advanced Features**
+   - Implement fine-tuning workflows
+   - Add prompt library and management
+   - Create collaborative features
+
+3. **Platform Expansion**
+   - Consider web interface version
+   - Develop mobile companion app
+   - Create CLI integration
+
+## 6. Implementation Checklist
+
+- [x] Fix configuration loading issue
+- [x] Enhance parameter editor
+- [x] Improve benchmark view
+- [x] Extend model manager with preset handling
+- [ ] Integrate all component changes
+- [ ] Test the application
+- [ ] Update documentation
+- [ ] Release initial enhanced version
+
+## 7. Resources Required
+
+1. **Development Resources**
+   - Python/PySide6 development environment
+   - SQLite database tools
+   - Ollama installation for testing
+
+2. **Testing Resources**
+   - Test datasets for benchmarking
+   - Various Ollama models for compatibility testing
+   - Different platforms for cross-platform testing
+
+3. **Documentation Resources**
+   - Documentation tools (Markdown, etc.)
+   - User guide templates
+   - API documentation generator
+
+## 8. Potential Challenges
+
+1. **Performance Considerations**
+   - Ensuring efficient database operations
+   - Optimizing visualization for large datasets
+   - Managing memory usage with large models
+
+2. **Cross-Platform Compatibility**
+   - Ensuring consistent behavior across platforms
+   - Handling platform-specific paths and configurations
+   - Managing different display densities
+
+3. **Ollama API Compatibility**
+   - Adapting to changes in the Ollama API
+   - Supporting different model types
+   - Handling API errors gracefully
+
+## 9. Conclusion
+
+The OllamaModelEditor project is progressing well with core functionality in place. The immediate focus is on fixing the identified issues and enhancing the user experience with improved parameter editing, benchmarking, and preset management.
+
+With these improvements, the application will provide a more robust and user-friendly interface for managing Ollama models, making it a valuable tool for AI developers and enthusiasts.
+
+================
+File: CurrentMods/Benchmark Methodology Documentation.md
+================
+# Benchmark Methodology Documentation
+
+## Overview
+
+This document describes the benchmarking methodology used in the OllamaModelEditor application to evaluate model performance under different parameter configurations. The benchmarking system is designed to provide quantitative performance metrics that help users optimize their models for specific use cases.
+
+## Benchmark Metrics
+
+The benchmark system measures several key performance indicators:
+
+1. **Generation Time**: The time taken for the model to generate a response, measured in seconds.
+2. **Token Processing Speed**: The number of tokens generated per second (tokens/s).
+3. **Input & Output Tokens**: The number of tokens in the prompt and the response.
+4. **Total Tokens**: The combined total of input and output tokens.
+5. **Success Rate**: The percentage of successful completions out of all attempts.
+
+## Benchmark Process
+
+### Standard Benchmark
+
+The standard benchmark process follows these steps:
+
+1. **Prompt Selection**: The user provides one or more prompts that represent their typical use case.
+2. **Repetition**: Each prompt is processed multiple times (default: 3) to ensure consistent results.
+3. **Parameter Configuration**: The benchmark can be run with the current parameters or compared with alternative configurations.
+4. **Execution**: The model processes each prompt the specified number of times.
+5. **Analysis**: Results are aggregated, analyzed, and presented in the UI.
+
+### Metrics Calculation
+
+- **Average Time**: The mean generation time across all runs for a prompt.
+- **Average Tokens**: The mean number of tokens (input + output) across all runs.
+- **Average Output Tokens**: The mean number of output tokens across all runs.
+- **Tokens Per Second**: Average output tokens divided by average time.
+- **Total Performance**: Aggregate metrics across all prompts.
+
+## Benchmark Categories
+
+### 1. Standard Benchmark
+
+The basic benchmark that evaluates model performance with user-provided prompts.
+
+**Use Case**: General performance testing and parameter optimization.
+
+### 2. Comparison Benchmark
+
+Runs the same prompts with two different parameter configurations to directly compare performance.
+
+**Use Case**: Evaluating the impact of parameter changes on performance.
+
+### 3. Stress Test (Planned)
+
+Tests the model's ability to handle more demanding tasks, such as:
+- Very long prompts
+- Complex reasoning tasks
+- Multiple consecutive requests
+- Memory-intensive operations
+
+**Use Case**: Evaluating the model's limits and stability under heavy load.
+
+### 4. Specialized Benchmarks (Planned)
+
+Targeted benchmarks for specific use cases:
+
+#### 4.1. Creative Writing
+
+Tests the model's ability to generate creative and diverse content. Measures:
+- Diversity of vocabulary
+- Syntactic variety
+- Creativity metrics
+
+#### 4.2. Factual Accuracy
+
+Tests the model's accuracy on factual questions across different domains.
+
+#### 4.3. Code Generation
+
+Tests the model's ability to generate correct, efficient code in various programming languages.
+
+#### 4.4. Context Utilization
+
+Tests how effectively the model uses context from longer prompts.
+
+## Interpreting Benchmark Results
+
+### Performance Metrics
+
+- **Higher Tokens/Second**: Indicates better raw performance.
+- **Lower Generation Time**: Indicates faster response.
+- **Successful Runs**: Indicates stability and reliability.
+
+### Parameter Impact
+
+The benchmark results should be interpreted in the context of parameter settings:
+
+- **Temperature**: Higher values may lead to more diverse but potentially slower responses.
+- **Max Tokens**: Higher values allow longer outputs but may increase generation time.
+- **TopP**: Affects the diversity and determinism of responses.
+- **Penalty Settings**: May impact generation speed and quality.
+
+## Best Practices for Benchmarking
+
+1. **Use Representative Prompts**: Select prompts that reflect your actual use case.
+2. **Run Multiple Repetitions**: Always use at least 3 repetitions for consistent results.
+3. **Test Multiple Parameters**: Compare different parameter configurations to find the optimal settings.
+4. **Control Testing Environment**: Ensure consistent hardware and system load during testing.
+5. **Consider Both Speed and Quality**: Faster isn't always better if quality suffers.
+
+## Planned Benchmark Features
+
+1. **Quality Metrics**: Automated evaluation of response quality.
+2. **Parameter Optimization**: Automated testing of parameter combinations to find optimal settings.
+3. **Historical Tracking**: Track performance changes over time or across model versions.
+4. **Benchmark Templates**: Pre-defined benchmark suites for common use cases.
+5. **Resource Monitoring**: Track memory usage, GPU utilization, and other system resources during benchmarking.
+
+## Example Benchmark Scenarios
+
+### General-Purpose Model Testing
+
+```
+Explain the concept of neural networks.
+Write a short story about a time traveler.
+Summarize the key points of climate change.
+```
+
+### Programming Model Testing
+
+```
+Write a function to find prime numbers in Python.
+Explain the difference between functional and object-oriented programming.
+Debug this code: [example code with errors]
+```
+
+### Creative Model Testing
+
+```
+Write a poem about artificial intelligence.
+Create a short science fiction story.
+Describe a futuristic city in the year 2200.
+```
+
+## Conclusion
+
+Effective benchmarking is essential for optimizing model performance and ensuring that models meet the specific requirements of your use case. The OllamaModelEditor benchmarking system provides the tools to evaluate models, compare different configurations, and make informed decisions about parameter settings.
+
+As the system evolves, additional metrics and testing capabilities will be added to provide more comprehensive and specialized benchmarking capabilities for different model types and use cases.
+
+================
+File: CurrentMods/BenchmarkView.py
+================
+# File: BenchmarkView.py
+# Path: OllamaModelEditor/GUI/Components/BenchmarkView.py
+# Standard: AIDEV-PascalCase-1.2
+# Created: 2025-03-11
+# Last Modified: 2025-03-13
+# Description: Benchmarking component with backward compatibility for the OllamaModelEditor application
+
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, 
+    QFormLayout, QSpinBox, QCheckBox, QTabWidget, QApplication, QFileDialog,
+    QFrame, QGridLayout, QMessageBox, QComboBox
+)
+from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtGui import QIcon
+import json
+import time
+from datetime import datetime
+
+class BenchmarkView(QWidget):
+    """Widget for benchmarking models with backward compatibility for StateManager."""
+    
+    def __init__(self, ModelManager, Config, StateManager=None):
+        """
+        Initialize the benchmark view.
+        
+        Args:
+            ModelManager: Model manager instance
+            Config: Configuration manager instance
+            StateManager: Optional parameter state manager instance
+        """
+        super().__init__()
+        
+        # Store references
+        self.ModelManager = ModelManager
+        self.Config = Config
+        self.StateManager = StateManager
+        
+        # Current benchmark results
+        self.CurrentResults = None
+        
+        # Running benchmark flag
+        self.IsRunning = False
+        
+        # Set up UI
+        self._SetupUI()
+    
+    def _SetupUI(self):
+        """Set up the user interface."""
+        # Create layout
+        Layout = QVBoxLayout()
+        self.setLayout(Layout)
+        
+        # Add header label
+        HeaderLabel = QLabel("Model Benchmark")
+        HeaderLabel.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 10px;")
+        Layout.addWidget(HeaderLabel)
+        
+        # Add description
+        DescriptionLabel = QLabel(
+            "Compare model performance with different configurations. "
+            "Enter sample prompts below to test how the model responds with current settings."
+        )
+        DescriptionLabel.setWordWrap(True)
+        Layout.addWidget(DescriptionLabel)
+        
+        # Add benchmark configuration section
+        ConfigFrame = QFrame()
+        ConfigFrame.setFrameShape(QFrame.StyledPanel)
+        ConfigLayout = QFormLayout(ConfigFrame)
+        
+        # Add model state view button if StateManager is available
+        if self.StateManager:
+            self.ViewStateButton = QPushButton("View Current Model State")
+            self.ViewStateButton.clicked.connect(self._OnViewModelState)
+            ConfigLayout.addRow(self.ViewStateButton)
+        
+        # Add benchmark type selector
+        BenchmarkTypeLayout = QHBoxLayout()
+        BenchmarkTypeLabel = QLabel("Benchmark Type:")
+        self.BenchmarkTypeCombo = QComboBox()
+        self.BenchmarkTypeCombo.addItems(["Standard", "Comparison", "Stress Test"])
+        self.BenchmarkTypeCombo.currentTextChanged.connect(self._OnBenchmarkTypeChanged)
+        BenchmarkTypeLayout.addWidget(BenchmarkTypeLabel)
+        BenchmarkTypeLayout.addWidget(self.BenchmarkTypeCombo)
+        ConfigLayout.addRow(BenchmarkTypeLayout)
+        
+        # Add model comparison selector
+        self.CompareCheckbox = QCheckBox("Compare with another configuration")
+        self.CompareCheckbox.toggled.connect(self._OnCompareToggled)
+        ConfigLayout.addRow(self.CompareCheckbox)
+        
+        # Add comparison config selector (initially hidden)
+        self.ComparisonConfigLayout = QHBoxLayout()
+        self.ComparisonConfigLabel = QLabel("Comparison config:")
+        self.ComparisonConfigLabel.setEnabled(False)
+        self.ComparisonConfigCombo = QComboBox()
+        self.ComparisonConfigCombo.setEnabled(False)
+        self.ComparisonConfigCombo.addItems(["Default", "Creative", "Precise", "Fast", "Custom..."])
+        self.ComparisonConfigLayout.addWidget(self.ComparisonConfigLabel)
+        self.ComparisonConfigLayout.addWidget(self.ComparisonConfigCombo, 1)
+        ConfigLayout.addRow(self.ComparisonConfigLayout)
+        
+        # Add repetition control
+        RepetitionLayout = QHBoxLayout()
+        self.RepetitionLabel = QLabel("Repetitions:")
+        self.RepetitionSpinner = QSpinBox()
+        self.RepetitionSpinner.setMinimum(1)
+        self.RepetitionSpinner.setMaximum(10)
+        self.RepetitionSpinner.setValue(3)
+        self.RepetitionSpinner.setToolTip("Number of times to run each prompt for more accurate benchmarking")
+        RepetitionLayout.addWidget(self.RepetitionLabel)
+        RepetitionLayout.addWidget(self.RepetitionSpinner)
+        RepetitionLayout.addStretch()
+        ConfigLayout.addRow(RepetitionLayout)
+        
+        Layout.addWidget(ConfigFrame)
+        
+        # Add prompt input
+        PromptLabel = QLabel("Enter benchmark prompts (one per line):")
+        Layout.addWidget(PromptLabel)
+        
+        self.PromptsText = QTextEdit()
+        self.PromptsText.setPlaceholderText("Enter benchmark prompts here...\n\nExample:\nSummarize the key features of neural networks.\nExplain the difference between supervised and unsupervised learning.\nWrite a short poem about artificial intelligence.")
+        self.PromptsText.setMinimumHeight(100)
+        Layout.addWidget(self.PromptsText)
+        
+        # Add buttons
+        ButtonLayout = QHBoxLayout()
+        
+        self.RunButton = QPushButton("Run Benchmark")
+        self.RunButton.setIcon(QIcon.fromTheme("media-playback-start"))
+        self.RunButton.clicked.connect(self._OnRunBenchmark)
+        ButtonLayout.addWidget(self.RunButton)
+        
+        self.StopButton = QPushButton("Stop")
+        self.StopButton.setIcon(QIcon.fromTheme("media-playback-stop"))
+        self.StopButton.clicked.connect(self._OnStopBenchmark)
+        self.StopButton.setEnabled(False)
+        ButtonLayout.addWidget(self.StopButton)
+        
+        self.SaveButton = QPushButton("Save Results")
+        self.SaveButton.setIcon(QIcon.fromTheme("document-save"))
+        self.SaveButton.clicked.connect(self._OnSaveResults)
+        self.SaveButton.setEnabled(False)
+        ButtonLayout.addWidget(self.SaveButton)
+        
+        Layout.addLayout(ButtonLayout)
+        
+        # Add results display with tabs
+        self.ResultsTabs = QTabWidget()
+        
+        # Summary tab
+        self.SummaryTab = QWidget()
+        SummaryLayout = QVBoxLayout(self.SummaryTab)
+        
+        self.SummaryText = QTextEdit()
+        self.SummaryText.setReadOnly(True)
+        SummaryLayout.addWidget(self.SummaryText)
+        
+        # Charts tab
+        self.ChartsTab = QWidget()
+        ChartsLayout = QVBoxLayout(self.ChartsTab)
+        
+        self.ChartPlaceholder = QLabel("Charts will appear here after running benchmarks")
+        self.ChartPlaceholder.setAlignment(Qt.AlignCenter)
+        ChartsLayout.addWidget(self.ChartPlaceholder)
+        
+        # Detailed results tab
+        self.DetailsTab = QWidget()
+        DetailsLayout = QVBoxLayout(self.DetailsTab)
+        
+        self.DetailsText = QTextEdit()
+        self.DetailsText.setReadOnly(True)
+        DetailsLayout.addWidget(self.DetailsText)
+        
+        # Add tabs to tab widget
+        self.ResultsTabs.addTab(self.SummaryTab, "Summary")
+        self.ResultsTabs.addTab(self.ChartsTab, "Charts")
+        self.ResultsTabs.addTab(self.DetailsTab, "Details")
+
+================
+File: CurrentMods/Main.py
+================
+# File: Main.py
+# Path: OllamaModelEditor/Main.py
+# Standard: AIDEV-PascalCase-1.2
+# Created: 2025-03-11
+# Last Modified: 2025-03-13
+# Description: Entry point for the OllamaModelEditor application
+
+import sys
+import logging
+from pathlib import Path
+import argparse
+
+# Add project root to path
+ProjectRoot = Path(__file__).resolve().parent
+sys.path.append(str(ProjectRoot))
+
+# Set up basic logging
+logging.basicConfig(level=logging.INFO, 
+                   format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+Logger = logging.getLogger('OllamaModelEditor')
+
+# Import Core components first to ensure they're available
+try:
+    from Core.DBManager import DBManager
+    from Core.LoggingUtils import SetupLogging
+    from Core.ConfigManager import ConfigManager
+    from Core.ParameterStateManager import ParameterStateManager
+    Logger.info("Core modules imported")
+except ImportError as e:
+    Logger.error(f"Error importing Core components: {e}")
+    print(f"Error importing Core components: {e}")
+    print("Please make sure all required files are in place.")
+    sys.exit(1)
+
+# Import PySide6 components
+try:
+    from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
+    from PySide6.QtCore import QTimer
+    Logger.info("PySide6 modules imported")
+except ImportError as e:
+    Logger.error(f"Error importing PySide6: {e}")
+    print("Error: PySide6 is required but not installed.")
+    print("Please install dependencies with: pip install -r requirements.txt")
+    sys.exit(1)
+
+# Import GUI components
+try:
+    from GUI.Windows.MainWindow import MainWindow
+    from GUI.Windows.SplashScreen import SplashScreen
+    Logger.info("GUI imports successful")
+except ImportError as e:
+    Logger.error(f"Error importing GUI components: {e}")
+    print(f"Error importing GUI components: {e}")
+    print("Please make sure all required files are in place.")
+    sys.exit(1)
+
+def ShowErrorAndExit(Message, Error=None):
+    """
+    Show error message and exit application.
+    
+    Args:
+        Message: Error message to display
+        Error: Optional error object with details
+    """
+    Logger.error(f"{Message}")
+    if Error:
+        Logger.error(f"Error: {Error}")
+    
+    # Create QApplication if needed
+    App = QApplication([])
+    
+    # Show error message
+    QMessageBox.critical(None, "OllamaModelEditor Error", f"{Message}\n\n{Error}")
+    
+    # Exit application
+    sys.exit(1)
+
+def ParseCommandLine():
+    """
+    Parse command line arguments.
+    
+    Returns:
+        Namespace with parsed arguments
+    """
+    Parser = argparse.ArgumentParser(description="OllamaModelEditor - A tool for managing Ollama AI models")
+    Parser.add_argument("--config", help="Path to configuration file")
+    Parser.add_argument("--db", help="Path to database file")
+    Parser.add_argument("--migrate", action="store_true", help="Migrate from file config to database")
+    Parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    return Parser.parse_args()
+
+def Main():
+    """Application entry point."""
+    # Parse command line arguments
+    Args = ParseCommandLine()
+    
+    # Set log level based on arguments
+    LogLevel = logging.DEBUG if Args.debug else logging.INFO
+    
+    Logger.info("Starting OllamaModelEditor")
+    
+    # Initialize database if using database storage
+    try:
+        DB = DBManager(Args.db) if Args.db else None
+        if DB:
+            Logger.info(f"Database initialized: {DB.DBPath}")
+    except Exception as Error:
+        ShowErrorAndExit("Error initializing database", Error)
+    
+    # Initialize logging
+    SetupLogging(LogLevel=LogLevel)
+    
+    # Create application
+    App = QApplication(sys.argv)
+    App.setApplicationName("OllamaModelEditor")
+    App.setOrganizationName("CallMeChewy")
+    
+    # Initialize configuration
+    try:
+        Config = ConfigManager(Args.config, DB)
+        
+        # Migrate from file to database if requested
+        if Args.migrate and DB:
+            Config.MigrateToDatabase(DB)
+        
+        Config.LoadConfig()
+        Logger.info("Configuration loaded")
+    except Exception as Error:
+        ShowErrorAndExit("Error loading configuration", Error)
+    
+    # Create and display splash screen
+    try:
+        Splash = SplashScreen()
+        Splash.show()
+        Logger.info("Splash screen displayed")
+    except Exception as Error:
+        Logger.error(f"Error creating splash screen: {Error}")
+        # Continue without splash screen
+        Splash = None
+    
+    # Create model manager
+    try:
+        from Core.ModelManager import ModelManager
+        ModelManager = ModelManager(Config)
+    except Exception as Error:
+        ShowErrorAndExit("Error creating model manager", Error)
+    
+    # Create parameter state manager
+    try:
+        StateManager = ParameterStateManager(ModelManager, Config)
+    except Exception as Error:
+        ShowErrorAndExit("Error creating parameter state manager", Error)
+    
+    # Initialize main window
+    try:
+        # Update this line to pass StateManager to MainWindow
+        MainWin = MainWindow(Config, StateManager)
+        Logger.info("Main window created")
+        
+        # Close splash and show main window after delay
+        if Splash:
+            QTimer.singleShot(2000, lambda: ShowMainWindow(Splash, MainWin))
+        else:
+            MainWin.show()
+    except Exception as Error:
+        ShowErrorAndExit("Failed to create main window", Error)
+    
+    # Start event loop
+    Logger.info("Starting application event loop")
+    return App.exec()
+
+def ShowMainWindow(Splash, MainWin):
+    """Close splash screen and show main window."""
+    try:
+        Splash.finish(MainWin)
+        MainWin.show()
+    except Exception as Error:
+        Logger.error(f"Error showing main window: {Error}")
+        MainWin.show()
+
+if __name__ == "__main__":
+    sys.exit(Main())
+
+================
+File: CurrentMods/mainwindow-update.py
+================
+# This is a partial implementation showing the changes needed to MainWindow.py
+
+# Update the __init__ method to accept the StateManager parameter
+def __init__(self, Config, StateManager):
+    """
+    Initialize the main window.
+    
+    Args:
+        Config: Configuration manager instance
+        StateManager: Parameter state manager instance
+    """
+    super().__init__()
+    
+    # Initialize logging
+    self.Logger = logging.getLogger('OllamaModelEditor.MainWindow')
+    
+    # Store configuration and state manager
+    self.Config = Config
+    self.StateManager = StateManager
+    
+    # Create model manager
+    self.ModelManager = ModelManager(Config)
+    
+    # Set up UI
+    self._SetupWindow()
+    self._CreateMenus()
+    self._CreateToolbars()
+    self._CreateStatusBar()
+    self._CreateCentralWidget()
+    self._CreateDockWidgets()
+    
+    # Load user preferences
+    self._LoadPreferences()
+    
+    # Connect signals and slots
+    self._ConnectSignals()
+    
+    # Load models
+    self._LoadModels()
+
+# Update the _CreateCentralWidget method to pass StateManager to ParameterEditor and BenchmarkView
+def _CreateCentralWidget(self):
+    """Create the central widget."""
+    # Create central widget
+    self.CentralWidget = QWidget()
+    self.setCentralWidget(self.CentralWidget)
+    
+    # Main layout
+    self.MainLayout = QVBoxLayout()
+    self.CentralWidget.setLayout(self.MainLayout)
+    
+    # Create tab widget
+    self.TabWidget = QTabWidget()
+    self.MainLayout.addWidget(self.TabWidget)
+    
+    # Add parameter editor tab - Pass StateManager to ParameterEditor
+    self.ParameterEditorWidget = ParameterEditor(self.ModelManager, self.Config, self.StateManager)
+    self.ParameterEditorWidget.SetStatusBar(self.StatusBar)  # Pass StatusBar reference
+    self.TabWidget.addTab(self.ParameterEditorWidget, "Parameter Editor")
+    
+    # Add benchmark tab - Pass StateManager to BenchmarkView 
+    self.BenchmarkWidget = BenchmarkView(self.ModelManager, self.Config, self.StateManager)
+    self.TabWidget.addTab(self.BenchmarkWidget, "Benchmark")
+    
+    # Add analysis tab if available
+    try:
+        from GUI.Components.AnalysisView import AnalysisView
+        self.AnalysisWidget = AnalysisView(self.ModelManager, self.Config)
+        self.TabWidget.addTab(self.AnalysisWidget, "Analysis")
+    except ImportError:
+        # Analysis view not available, skip
+        pass
+
+================
+File: CurrentMods/OllamaModelEditor Implementation Updates.md
+================
+# OllamaModelEditor Implementation Updates
+
+## Overview
+
+Based on the benchmark results and requirements analysis, several significant enhancements have been implemented to improve the OllamaModelEditor application. This document outlines the key changes and provides guidance for integration.
+
+## Key Enhancements
+
+### 1. Parameter State Tracking
+
+The application now tracks original and current parameter states for each model, allowing users to see what changes they've made during a session. This is implemented through a new `ParameterStateManager` class.
+
+**Benefits:**
+- Users can see how their current parameter values differ from the original values
+- Original states are preserved for comparison and reset functionality
+- Model file contents are loaded and displayed when available
+
+### 2. Enhanced Parameter Editor
+
+The parameter editor has been significantly improved with:
+- A tabbed interface for parameters, state changes, and model file view
+- Visual highlighting of changed parameters
+- Improved reset functionality with options to reset to original or default values
+- Better preset management integration
+
+**Benefits:**
+- Clearer visualization of parameter changes
+- More comprehensive parameter management
+- Access to complete model information
+
+### 3. Improved Benchmark View
+
+The benchmark view now provides:
+- Model state information during benchmarking
+- Multiple benchmark types (Standard, Comparison, Stress Test)
+- Enhanced result visualization showing parameter differences
+- More detailed performance comparisons
+
+**Benefits:**
+- Users can see exactly what parameter configuration was tested
+- Multiple benchmark types for different use cases
+- Better visualization of results
+
+### 4. Comprehensive Benchmark Methodology
+
+A detailed benchmark methodology document has been created that:
+- Explains the benchmarking process and metrics
+- Defines different benchmark categories and their purposes
+- Provides best practices for effective benchmarking
+- Outlines planned future benchmark features
+
+**Benefits:**
+- Users understand what is being tested and why
+- Provides guidance for effective benchmarking
+- Sets expectations for future features
+
+## Integration Steps
+
+To integrate these enhancements into the OllamaModelEditor application:
+
+### 1. Add Parameter State Manager
+
+Add the new `ParameterStateManager` class to the Core components:
+```
+Core/ParameterStateManager.py
+```
+
+### 2. Update Main Application
+
+Modify `Main.py` to initialize the state manager:
+
+```python
+# Create state manager
+StateManager = ParameterStateManager(ModelManager, ConfigManager)
+
+# Pass state manager to UI components
+MainWindow = MainWindow(ConfigManager, ModelManager, StateManager)
+```
+
+### 3. Update MainWindow
+
+Modify `MainWindow` to pass the state manager to the relevant components:
+
+```python
+# Create parameter editor with state manager
+self.ParameterEditorWidget = ParameterEditor(self.ModelManager, self.Config, self.StateManager)
+
+# Create benchmark view with state manager
+self.BenchmarkWidget = BenchmarkView(self.ModelManager, self.Config, self.StateManager)
+```
+
+### 4. Replace UI Components
+
+Replace the existing ParameterEditor and BenchmarkView components with the enhanced versions.
+
+### 5. Add Documentation
+
+Add the benchmark methodology document to the documentation directory:
+
+```
+docs/BenchmarkMethodology.md
+```
+
+## Testing Guidelines
+
+After integration, thoroughly test the following:
+
+1. **Parameter State Tracking**
+   - Load a model and modify its parameters
+   - Verify the state changes table correctly shows differences
+   - Test reset to original and default functionality
+
+2. **Model File Display**
+   - Verify model file content is displayed when available
+   - Check that all model parameters are correctly shown
+
+3. **Benchmarking**
+   - Test standard benchmarking with current parameters
+   - Test comparison benchmarking with a different configuration
+   - Verify benchmark results correctly display parameter information
+   - Test saving and loading benchmark results
+
+## Future Development
+
+Based on these enhancements, consider the following future developments:
+
+1. **Advanced Visualization**
+   - Implement proper charting for benchmark results
+   - Add visual parameter relationship diagrams
+   - Create interactive charts for comparing benchmark results
+
+2. **Additional Benchmark Types**
+   - Complete stress test implementation
+   - Add specialized benchmarks for different model use cases
+   - Implement benchmark templates for common scenarios
+
+3. **Parameter Optimization**
+   - Add parameter optimization suggestions based on benchmark results
+   - Implement automatic parameter tuning
+   - Create optimization profiles for different use cases
+
+## Conclusion
+
+These enhancements significantly improve the user experience and functionality of the OllamaModelEditor. By clearly showing model states and parameter changes, and providing comprehensive benchmarking capabilities, users can better understand and optimize their models for specific use cases.
+
+The implementation follows the AIDEV-PascalCase-1.2 standard and maintains compatibility with the existing codebase while adding powerful new capabilities.
+
+================
+File: CurrentMods/ParameterEditor.py
+================
+# File: ParameterEditor.py
+# Path: OllamaModelEditor/GUI/Components/ParameterEditor.py
+# Standard: AIDEV-PascalCase-1.2
+# Created: 2025-03-11
+# Last Modified: 2025-03-13
+# Description: Parameter editing component for the OllamaModelEditor application with backward compatibility
+
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QSpinBox, QDoubleSpinBox,
+    QPushButton, QGridLayout, QGroupBox, QTextEdit, QComboBox, QMessageBox,
+    QInputDialog, QLineEdit, QFrame, QTabWidget
+)
+from PySide6.QtCore import Qt, QEvent, Signal, Slot
+from PySide6.QtGui import QIcon
+from typing import Dict, Any, Tuple, List, Optional
+
+class ParameterEditor(QWidget):
+    """Widget for editing model parameters with backward compatibility for StateManager."""
+    
+    # Signal emitted when parameters are applied
+    ParametersApplied = Signal(dict)
+    
+    def __init__(self, ModelManager, Config, StateManager=None):
+        """
+        Initialize the parameter editor.
+        
+        Args:
+            ModelManager: Model manager instance
+            Config: Configuration manager instance
+            StateManager: Optional parameter state manager instance
+        """
+        super().__init__()
+        
+        # Store references
+        self.ModelManager = ModelManager
+        self.Config = Config
+        self.StateManager = StateManager
+        self.CurrentModel = None
+        self.ParameterControls = {}
+        
+        # Access status bar from parent (will be set after initialization)
+        self.StatusBar = None
+        
+        # Set up UI
+        self._SetupUI()
+    
+    def _SetupUI(self):
+        """Set up the user interface."""
+        # Create layout
+        Layout = QVBoxLayout()
+        self.setLayout(Layout)
+        
+        # Add header layout with labels and presets
+        HeaderLayout = QHBoxLayout()
+        
+        # Add header label
+        HeaderLabel = QLabel("Model Parameters")
+        HeaderLabel.setStyleSheet("font-weight: bold; font-size: 14px;")
+        HeaderLayout.addWidget(HeaderLabel)
+        
+        # Add spacer
+        HeaderLayout.addStretch()
+        
+        # Add preset selector
+        PresetLayout = QHBoxLayout()
+        PresetLabel = QLabel("Preset:")
+        self.PresetCombo = QComboBox()
+        self.LoadPresets()  # Populate presets
+        
+        self.SavePresetButton = QPushButton("Save Preset")
+        self.SavePresetButton.setIcon(QIcon.fromTheme("document-save"))
+        self.SavePresetButton.clicked.connect(self._OnSavePreset)
+        
+        PresetLayout.addWidget(PresetLabel)
+        PresetLayout.addWidget(self.PresetCombo)
+        PresetLayout.addWidget(self.SavePresetButton)
+        
+        HeaderLayout.addLayout(PresetLayout)
+        
+        Layout.addLayout(HeaderLayout)
+        
+        # Create main content area - using TabWidget if StateManager is available
+        if self.StateManager:
+            self.TabWidget = QTabWidget()
+            
+            # Parameters tab
+            self.ParametersTab = QWidget()
+            ParametersLayout = QVBoxLayout(self.ParametersTab)
+            
+            # Create parameters section
+            ParametersGroupBox = QGroupBox("Basic Parameters")
+            ParamLayout = QVBoxLayout(ParametersGroupBox)
+            
+            # Create parameters grid
+            self.ParametersGrid = QGridLayout()
+            ParamLayout.addLayout(self.ParametersGrid)
+            
+            ParametersLayout.addWidget(ParametersGroupBox)
+            
+            # Add advanced parameters section
+            AdvancedGroupBox = QGroupBox("Advanced Parameters")
+            AdvancedGroupBox.setCheckable(True)
+            AdvancedGroupBox.setChecked(False)
+            AdvancedLayout = QVBoxLayout(AdvancedGroupBox)
+            
+            # Create advanced parameters grid
+            self.AdvancedParametersGrid = QGridLayout()
+            AdvancedLayout.addLayout(self.AdvancedParametersGrid)
+            
+            ParametersLayout.addWidget(AdvancedGroupBox)
+            
+            # Add parameter description section
+            DescriptionGroupBox = QGroupBox("Parameter Description")
+            DescriptionLayout = QVBoxLayout(DescriptionGroupBox)
+            
+            self.DescriptionText = QTextEdit()
+            self.DescriptionText.setReadOnly(True)
+            self.DescriptionText.setMinimumHeight(100)
+            self.DescriptionText.setPlaceholderText("Select a parameter to see its description")
+            DescriptionLayout.addWidget(self.DescriptionText)
+            
+            ParametersLayout.addWidget(DescriptionGroupBox)
+            
+            # Add to tab widget
+            self.TabWidget.addTab(self.ParametersTab, "Parameters")
+            
+            # State changes tab (only if StateManager available)
+            if self.StateManager:
+                self._AddStateTab()
+            
+            Layout.addWidget(self.TabWidget)
+        else:
+            # Legacy layout without tabs
+            # Create parameters section
+            ParametersGroupBox = QGroupBox("Basic Parameters")
+            ParamLayout = QVBoxLayout(ParametersGroupBox)
+            
+            # Create parameters grid
+            self.ParametersGrid = QGridLayout()
+            ParamLayout.addLayout(self.ParametersGrid)
+            
+            Layout.addWidget(ParametersGroupBox)
+            
+            # Add advanced parameters section
+            AdvancedGroupBox = QGroupBox("Advanced Parameters")
+            AdvancedGroupBox.setCheckable(True)
+            AdvancedGroupBox.setChecked(False)
+            AdvancedLayout = QVBoxLayout(AdvancedGroupBox)
+            
+            # Create advanced parameters grid
+            self.AdvancedParametersGrid = QGridLayout()
+            AdvancedLayout.addLayout(self.AdvancedParametersGrid)
+            
+            Layout.addWidget(AdvancedGroupBox)
+            
+            # Add parameter description section
+            DescriptionGroupBox = QGroupBox("Parameter Description")
+            DescriptionLayout = QVBoxLayout(DescriptionGroupBox)
+            
+            self.DescriptionText = QTextEdit()
+            self.DescriptionText.setReadOnly(True)
+            self.DescriptionText.setMinimumHeight(100)
+            self.DescriptionText.setPlaceholderText("Select a parameter to see its description")
+            DescriptionLayout.addWidget(self.DescriptionText)
+            
+            Layout.addWidget(DescriptionGroupBox)
+        
+        # Add action buttons
+        ButtonFrame = QFrame()
+        ButtonLayout = QHBoxLayout(ButtonFrame)
+        ButtonLayout.setContentsMargins(0, 10, 0, 0)
+        
+        self.ApplyButton = QPushButton("Apply Changes")
+        self.ApplyButton.setIcon(QIcon.fromTheme("dialog-ok-apply"))
+        self.ApplyButton.clicked.connect(self._OnApplyChanges)
+        ButtonLayout.addWidget(self.ApplyButton)
+        
+        # Add reset to original button if StateManager is available
+        if self.StateManager:
+            self.ResetButton = QPushButton("Reset to Original")
+            self.ResetButton.setIcon(QIcon.fromTheme("edit-undo"))
+            self.ResetButton.clicked.connect(self._OnResetToOriginal)
+            ButtonLayout.addWidget(self.ResetButton)
+        
+        self.DefaultButton = QPushButton("Reset to Default")
+        self.DefaultButton.setIcon(QIcon.fromTheme("edit-clear"))
+        self.DefaultButton.clicked.connect(self._OnResetToDefault)
+        ButtonLayout.addWidget(self.DefaultButton)
+        
+        Layout.addWidget(ButtonFrame)
+        
+        # Add placeholder message (hidden initially)
+        self.PlaceholderLabel = QLabel("Select a model to edit parameters")
+        self.PlaceholderLabel.setAlignment(Qt.AlignCenter)
+        self.PlaceholderLabel.setVisible(False)
+        Layout.addWidget(self.PlaceholderLabel)
+    
+    def _AddStateTab(self):
+        """Add state changes tab to the tab widget."""
+        from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
+        from PySide6.QtGui import QColor
+        
+        self.StateTab = QWidget()
+        StateLayout = QVBoxLayout(self.StateTab)
+        
+        # Add state changes table
+        StateLabel = QLabel("Parameter State Changes")
+        StateLayout.addWidget(StateLabel)
+        
+        self.StateTable = QTableWidget(0, 3)  # Rows will be added dynamically
+        self.StateTable.setHorizontalHeaderLabels(["Parameter", "Original Value", "Current Value"])
+        self.StateTable.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.StateTable.verticalHeader().setVisible(False)
+        StateLayout.addWidget(self.StateTable)
+        
+        # Add model file tab
+        self.ModelFileTab = QWidget()
+        ModelFileLayout = QVBoxLayout(self.ModelFileTab)
+        
+        self.ModelFileText = QTextEdit()
+        self.ModelFileText.setReadOnly(True)
+        self.ModelFileText.setLineWrapMode(QTextEdit.NoWrap)
+        self.ModelFileText.setFont(self.font())  # Use default font
+        ModelFileLayout.addWidget(self.ModelFileText)
+        
+        # Add tabs to the tab widget
+        self.TabWidget.addTab(self.StateTab, "State Changes")
+        self.TabWidget.addTab(self.ModelFileTab, "Model File")
+    
+    def SetStatusBar(self, StatusBar):
+        """
+        Set the status bar reference.
+        
+        Args:
+            StatusBar: Status bar widget
+        """
+        self.StatusBar = StatusBar
+    
+    def LoadModel(self, ModelName: str):
+        """
+        Load a model for editing.
+        
+        Args:
+            ModelName: Name of the model to load
+        """
+        # Store current model
+        self.CurrentModel = ModelName
+        
+        # Hide placeholder
+        self.PlaceholderLabel.setVisible(False)
+        
+        # Load model state if StateManager is available
+        if self.StateManager:
+            OriginalState, CurrentState = self.StateManager.LoadModelState(ModelName)
+        
+        # Clear parameters grid
+        self._ClearParameterGrids()
+        
+        # Clear parameter controls
+        self.ParameterControls = {}
+        
+        # Get model parameters
+        ModelParams = self.Config.GetModelConfig(ModelName)
+        
+        # Get parameter descriptions from database if available
+        ParameterDescriptions = {}
+        if self.Config.DB:
+            # Get all parameters
+            Parameters = self.Config.DB.GetAllParameters()
+            for Param in Parameters:
+                ParameterDescriptions[Param['Name']] = Param['Description']
+        
+        # Add parameter controls
+        self._CreateParameterControl(
+            "Temperature", 
+            ModelParams.get('Temperature', 0.7), 
+            0.0, 2.0, 0.1, 
+            False,
+            ParameterDescriptions.get('Temperature', '')
+        )
+        
+        self._CreateParameterControl(
+            "TopP", 
+            ModelParams.get('TopP', 0.9), 
+            0.0, 1.0, 0.01, 
+            False,
+            ParameterDescriptions.get('TopP', '')
+        )
+        
+        self._CreateParameterControl(
+            "MaxTokens", 
+            ModelParams.get('MaxTokens', 2048), 
+            1, 32000, 1, 
+            True,
+            ParameterDescriptions.get('MaxTokens', '')
+        )
+        
+        self._CreateParameterControl(
+            "FrequencyPenalty", 
+            ModelParams.get('FrequencyPenalty', 0.0), 
+            0.0, 2.0, 0.1, 
+            False,
+            ParameterDescriptions.get('FrequencyPenalty', '')
+        )
+        
+        self._CreateParameterControl(
+            "PresencePenalty", 
+            ModelParams.get('PresencePenalty', 0.0), 
+            0.0, 2.0, 0.1, 
+            False,
+            ParameterDescriptions.get('PresencePenalty', '')
+        )
+        
+        # Update state table if StateManager is available
+        if self.StateManager and hasattr(self, 'StateTable'):
+            self._UpdateStateTable()
+        
+        # Update model file view if StateManager is available
+        if self.StateManager and hasattr(self, 'ModelFileText'):
+            self._UpdateModelFileView()
+        
+        # Set preset to "Custom" (will be updated if it matches a preset)
+        Index = self.PresetCombo.findText("Custom")
+        if Index >= 0:
+            self.PresetCombo.setCurrentIndex(Index)
+        
+        # Check if current state matches a preset
+        if self.StateManager:
+            self._CheckForMatchingPreset(ModelParams)
+    
+    def _ClearParameterGrids(self):
+        """Clear parameter grid layouts."""
+        # Clear basic parameters grid
+        while self.ParametersGrid.count():
+            Item = self.ParametersGrid.takeAt(0)
+            if Item.widget():
+                Item.widget().deleteLater()
+        
+        # Clear advanced parameters grid
+        while self.AdvancedParametersGrid.count():
+            Item = self.AdvancedParametersGrid.takeAt(0)
+            if Item.widget():
+                Item.widget().deleteLater()
+    
+    def _CreateParameterControl(self, Name, Value, Min, Max, Step, IsInteger=False, Description=""):
+        """
+        Add a parameter control to the grid.
+        
+        Args:
+            Name: Parameter name
+            Value: Current value
+            Min: Minimum value
+            Max: Maximum value
+            Step: Step size
+            IsInteger: Whether the parameter is an integer
+            Description: Parameter description
+        """
+        # Determine which grid to use
+        if Name in ["Temperature", "TopP", "MaxTokens"]:
+            Grid = self.ParametersGrid
+            Row = Grid.rowCount()
+        else:
+            Grid = self.AdvancedParametersGrid
+            Row = Grid.rowCount()
+        
+        # Add label
+        Label = QLabel(f"{Name}:")
+        Grid.addWidget(Label, Row, 0)
+        
+        # Add slider
+        Slider = QSlider(Qt.Horizontal)
+        if IsInteger:
+            Slider.setMinimum(int(Min))
+            Slider.setMaximum(int(Max))
+            Slider.setValue(int(Value))
+        else:
+            Slider.setMinimum(int(Min * 100))
+            Slider.setMaximum(int(Max * 100))
+            Slider.setValue(int(Value * 100))
+        Grid.addWidget(Slider, Row, 1)
+        
+        # Add spin box
+        if IsInteger:
+            SpinBox = QSpinBox()
+            SpinBox.setMinimum(int(Min))
+            SpinBox.setMaximum(int(Max))
+            SpinBox.setValue(int(Value))
+        else:
+            SpinBox = QDoubleSpinBox()
+            SpinBox.setMinimum(Min)
+            SpinBox.setMaximum(Max)
+            SpinBox.setSingleStep(Step)
+            SpinBox.setValue(Value)
+            SpinBox.setDecimals(2)
+        Grid.addWidget(SpinBox, Row, 2)
+        
+        # Store parameter description
+        Slider.setProperty("ParameterName", Name)
+        Slider.setProperty("ParameterDescription", Description)
+        SpinBox.setProperty("ParameterName", Name)
+        SpinBox.setProperty("ParameterDescription", Description)
+        
+        # Connect signals
+        if IsInteger:
+            Slider.valueChanged.connect(SpinBox.setValue)
+            SpinBox.valueChanged.connect(Slider.setValue)
+        else:
+            Slider.valueChanged.connect(lambda v: SpinBox.setValue(v / 100))
+            SpinBox.valueChanged.connect(lambda v: Slider.setValue(int(v * 100)))
+        
+        # Connect update signals
+        if self.StateManager:
+            Slider.valueChanged.connect(lambda: self._OnParameterChanged(Name))
+            SpinBox.valueChanged.connect(lambda: self._OnParameterChanged(Name))
+        
+        # Connect description update signals
+        Slider.sliderPressed.connect(lambda: self._UpdateDescription(Name, Description))
+        SpinBox.installEventFilter(self)
+        
+        # Store controls for later access
+        self.ParameterControls[Name] = (Slider, SpinBox)
+    
+    def eventFilter(self, obj, event):
+        """Handle focus events for parameter controls."""
+        if event.type() == QEvent.FocusIn:
+            # If it's a parameter control, update description
+            ParameterName = obj.property("ParameterName")
+            if ParameterName:
+                Description = obj.property("ParameterDescription")
+                self._UpdateDescription(ParameterName, Description)
+        
+        return super().eventFilter(obj, event)
+    
+    def _UpdateDescription(self, ParameterName, Description):
+        """
+        Update the parameter description text.
+        
+        Args:
+            ParameterName: Name of the parameter
+            Description: Description text
+        """
+        # Get parameter descriptions from database if available
+        if self.Config.DB:
+            # Try to get from database
+            Parameter = self.Config.DB.GetParameter(ParameterName)
+            if Parameter and Parameter.get('Description'):
+                Description = Parameter.get('Description')
+        
+        # If no description is available, use predefined descriptions
+        if not Description:
+            Descriptions = {
+                "Temperature": "Controls randomness in text generation. Higher values (0.7-1.0) produce more creative outputs, while lower values (0.2-0.5) make output more focused and deterministic.",
+                "TopP": "Controls diversity via nucleus sampling. Lower values make output more focused on likely tokens. 0.9 is a good starting point.",
+                "MaxTokens": "The maximum length of the generated text. Higher values allow for longer responses but consume more resources.",
+                "FrequencyPenalty": "Reduces repetition by penalizing tokens that have already appeared in the text. Higher values (0.5-1.0) strongly discourage repetition.",
+                "PresencePenalty": "Penalizes tokens that have appeared at all, encouraging the model to discuss new topics. Useful for keeping responses diverse."
+            }
+            Description = Descriptions.get(ParameterName, f"No description available for {ParameterName}")
+        
+        # Update the description text
+        self.DescriptionText.setHtml(f"<h3>{ParameterName}</h3>\n<p>{Description}</p>")
+    
+    def _OnParameterChanged(self, ParameterName):
+        """
+        Handle parameter value change.
+        
+        Args:
+            ParameterName: Name of the changed parameter
+        """
+        if not self.CurrentModel or not self.StateManager:
+            return
+        
+        # Get current parameter values
+        Params = self._GetParametersFromControls()
+        
+        # Update state manager
+        self.StateManager.UpdateCurrentState(self.CurrentModel, Params)
+        
+        # Update state table
+        self._UpdateStateTable()
+        
+        # Check if current state matches a preset
+        self._CheckForMatchingPreset(Params)
+    
+    def _UpdateStateTable(self):
+        """Update the state changes table."""
+        if not self.CurrentModel or not self.StateManager or not hasattr(self, 'StateTable'):
+            return
+        
+        # Get state differences
+        Differences = self.StateManager.GetStateDifferences(self.CurrentModel)
+        
+        # Clear table
+        self.StateTable.setRowCount(0)
+        
+        # Add differences to table
+        Row = 0
+        for Param, (OrigValue, CurrValue) in Differences.items():
+            self.StateTable.insertRow(Row)
+            
+            # Add parameter name
+            ParamItem = QTableWidgetItem(Param)
+            ParamItem.setFlags(ParamItem.flags() & ~Qt.ItemIsEditable)
+            self.StateTable.setItem(Row, 0, ParamItem)
+            
+            # Add original value
+            OrigItem = QTableWidgetItem(str(OrigValue))
+            OrigItem.setFlags(OrigItem.flags() & ~Qt.ItemIsEditable)
+            self.StateTable.setItem(Row, 1, OrigItem)
+            
+            # Add current value (highlighted)
+            CurrItem = QTableWidgetItem(str(CurrValue))
+            CurrItem.setFlags(CurrItem.flags() & ~Qt.ItemIsEditable)
+            
+            from PySide6.QtGui import QColor
+            CurrItem.setBackground(QColor(255, 255, 0, 100))  # Light yellow highlight
+            self.StateTable.setItem(Row, 2, CurrItem)
+            
+            Row += 1
+    
+    def _UpdateModelFileView(self):
+        """Update the model file view."""
+        if not self.CurrentModel or not self.StateManager or not hasattr(self, 'ModelFileText'):
+            return
+        
+        # Get model file content
+        ModelFile = self.StateManager.GetModelFile(self.CurrentModel)
+        
+        if ModelFile:
+            import json
+            # Format as pretty JSON
+            ModelFileText = json.dumps(ModelFile, indent=2)
+            self.ModelFileText.setText(ModelFileText)
+        else:
+            self.ModelFileText.setText("Model file not available")
+    
+    def LoadPresets(self):
+        """Load available presets into the preset combo box."""
+        self.PresetCombo.clear()
+        
+        # Add "Custom" option (for current state)
+        self.PresetCombo.addItem("Custom")
+        
+        # Add built-in presets
+        BuiltInPresets = ["Default", "Creative", "Precise", "Fast", "Balanced"]
+        for Preset in BuiltInPresets:
+            self.PresetCombo.addItem(Preset)
+        
+        # Add user presets from database if available
+        if self.Config.DB:
+            UserPresets = self.Config.DB.GetUserPresets()
+            for Preset in UserPresets:
+                self.PresetCombo.addItem(Preset.get('Name', 'Unknown'))
+        
+        # Connect signal
+        self.PresetCombo.currentTextChanged.connect(self._OnPresetSelected)
+    
+    def _CheckForMatchingPreset(self, Params):
+        """
+        Check if current parameters match a preset.
+        
+        Args:
+            Params: Current parameters
+        """
+        if not self.StateManager:
+            return
+            
+        # Compare with each preset
+        PresetNames = ["Default", "Creative", "Precise", "Fast", "Balanced"]
+        
+        for PresetName in PresetNames:
+            PresetParams = None
+            
+            # Get preset parameters
+            if hasattr(self.ModelManager, 'GetPresetParameters'):
+                PresetParams = self.ModelManager.GetPresetParameters(PresetName)
+            else:
+                # Fallback to hardcoded presets if method not available
+                Presets = {
+                    "Default": {
+                        'Temperature': 0.7,
+                        'TopP': 0.9,
+                        'MaxTokens': 2048,
+                        'FrequencyPenalty': 0.0,
+                        'PresencePenalty': 0.0
+                    },
+                    "Creative": {
+                        'Temperature': 1.0,
+                        'TopP': 0.95,
+                        'MaxTokens': 4096,
+                        'FrequencyPenalty': 0.0,
+                        'PresencePenalty': 0.0
+                    },
+                    "Precise": {
+                        'Temperature': 0.3,
+                        'TopP': 0.7,
+                        'MaxTokens': 2048,
+                        'FrequencyPenalty': 0.5,
+                        'PresencePenalty': 0.0
+                    },
+                    "Fast": {
+                        'Temperature': 0.7,
+                        'TopP': 0.9,
+                        'MaxTokens': 1024,
+                        'FrequencyPenalty': 0.0,
+                        'PresencePenalty': 0.0
+                    },
+                    "Balanced": {
+                        'Temperature': 0.6,
+                        'TopP': 0.85,
+                        'MaxTokens': 2048,
+                        'FrequencyPenalty': 0.3,
+                        'PresencePenalty': 0.3
+                    }
+                }
+                PresetParams = Presets.get(PresetName)
+            
+            if PresetParams:
+                # Check if parameters match
+                Matches = True
+                for Key, Value in PresetParams.items():
+                    if Key in Params and abs(Params[Key] - Value) > 0.001:
+                        Matches = False
+                        break
+                
+                if Matches:
+                    # Set preset combo to matching preset
+                    Index = self.PresetCombo.findText(PresetName)
+                    if Index >= 0:
+                        self.PresetCombo.blockSignals(True)
+                        self.PresetCombo.setCurrentIndex(Index)
+                        self.PresetCombo.blockSignals(False)
+                    return
+        
+        # If no match found, set to "Custom"
+        Index = self.PresetCombo.findText("Custom")
+        if Index >= 0:
+            self.PresetCombo.blockSignals(True)
+            self.PresetCombo.setCurrentIndex(Index)
+            self.PresetCombo.blockSignals(False)
+    
+    def _OnPresetSelected(self, PresetName):
+        """
+        Handle preset selection.
+        
+        Args:
+            PresetName: Name of the selected preset
+        """
+        if not self.CurrentModel or PresetName == "Custom":
+            return
+        
+        # Get preset parameters
+        PresetParams = None
+        
+        if hasattr(self.ModelManager, 'GetPresetParameters'):
+            PresetParams = self.ModelManager.GetPresetParameters(PresetName)
+        else:
+            # Fallback to hardcoded presets if method not available
+            Presets = {
+                "Default": {
+                    'Temperature': 0.7,
+                    'TopP': 0.9,
+                    'MaxTokens': 2048,
+                    'FrequencyPenalty': 0.0,
+                    'PresencePenalty': 0.0
+                },
+                "Creative": {
+                    'Temperature': 1.0,
+                    'TopP': 0.95,
+                    'MaxTokens': 4096,
+                    'FrequencyPenalty': 0.0,
+                    'PresencePenalty': 0.0
+                },
+                "Precise": {
+                    'Temperature': 0.3,
+                    'TopP': 0.7,
+                    'MaxTokens': 2048,
+                    'FrequencyPenalty': 0.5,
+                    'PresencePenalty': 0.0
+                },
+                "Fast": {
+                    'Temperature': 0.7,
+                    'TopP': 0.9,
+                    'MaxTokens': 1024,
+                    'FrequencyPenalty': 0.0,
+                    'PresencePenalty': 0.0
+                },
+                "Balanced": {
+                    'Temperature': 0.6,
+                    'TopP': 0.85,
+                    'MaxTokens': 2048,
+                    'FrequencyPenalty': 0.3,
+                    'PresencePenalty': 0.3
+                }
+            }
+            PresetParams = Presets.get(PresetName)
+        
+        if not PresetParams:
+            return
+        
+        # Apply preset parameters to controls
+        self._ApplyParametersToControls(PresetParams)
+        
+        # Update state manager
+        if self.StateManager:
+            self.StateManager.UpdateCurrentState(self.CurrentModel, PresetParams)
+            
+            # Update state table
+            self._UpdateStateTable()
+    
+    def _OnSavePreset(self):
+        """Handle save preset button click."""
+        # Get current parameter values
+        Params = self._GetParametersFromControls()
+        
+        # Prompt user for preset name
+        PresetName, OK = QInputDialog.getText(
+            self,
+            "Save Preset",
+            "Enter a name for this preset:",
+            QLineEdit.Normal,
+            ""
+        )
+        
+        if not OK or not PresetName:
+            return
+        
+        # Prompt for description
+        Description, OK = QInputDialog.getText(
+            self,
+            "Preset Description",
+            "Enter a description for this preset:",
+            QLineEdit.Normal,
+            ""
+        )
+        
+        if not OK:
+            Description = ""
+        
+        # Save preset
+        Success = False
+        if hasattr(self.ModelManager, 'SaveUserPreset'):
+            Success = self.ModelManager.SaveUserPreset(PresetName, Description, Params)
+        else:
+            # If SaveUserPreset method not available, try to use database directly
+            if self.Config.DB:
+                try:
+                    self.Config.DB.SaveUserPreset(PresetName, Description, Params)
+                    Success = True
+                except:
+                    Success = False
+        
+        if Success:
+            # Update preset list
+            self.LoadPresets()
+            
+            # Select the new preset
+            Index = self.PresetCombo.findText(PresetName)
+            if Index >= 0:
+                self.PresetCombo.setCurrentIndex(Index)
+        else:
+            # Show error message
+            QMessageBox.warning(
+                self,
+                "Save Error",
+                "Error saving preset. Please check the logs for details."
+            )
+    
+    def _GetParametersFromControls(self):
+        """
+        Get parameter values from controls.
+        
+        Returns:
+            Dict: Parameter values
+        """
+        Params = {}
+        
+        for Name, (Slider, SpinBox) in self.ParameterControls.items():
+            Params[Name] = SpinBox.value()
+        
+        return Params
+    
+    def _ApplyParametersToControls(self, Params):
+        """
+        Apply parameter values to controls.
+        
+        Args:
+            Params: Dictionary of parameter values
+        """
+        for Name, Value in Params.items():
+            if Name in self.ParameterControls:
+                Slider, SpinBox = self.ParameterControls[Name]
+                
+                # Block signals to prevent recursive updates
+                SpinBox.blockSignals(True)
+                Slider.blockSignals(True)
+                
+                SpinBox.setValue(Value)
+                
+                # Set slider value (scaled for non-integer values)
+                if isinstance(SpinBox, QDoubleSpinBox):
+                    Slider.setValue(int(Value * 100))
+                else:
+                    Slider.setValue(Value)
+                
+                # Unblock signals
+                SpinBox.blockSignals(False)
+                Slider.blockSignals(False)
+        
+        # Trigger parameter changed event for each parameter if StateManager is available
+        if self.StateManager:
+            for Name in Params.keys():
+                if Name in self.ParameterControls:
+                    self._OnParameterChanged(Name)
+    
+    def _OnApplyChanges(self):
+        """Handle apply changes button click."""
+        if not self.CurrentModel:
+            return
+        
+        # Get parameter values
+        Params = self._GetParametersFromControls()
+        
+        # Update model parameters
+        Success = self.ModelManager.UpdateModelParameters(self.CurrentModel, Params)
+        
+        if Success:
+            # Commit current state if StateManager is available
+            if self.StateManager:
+                self.StateManager.CommitCurrentState(self.CurrentModel)
+                
+                # Update state table
+                self._UpdateStateTable()
+            
+            # Show success message
+            if self.StatusBar:
+                self.StatusBar.showMessage(f"Parameters updated for {self.CurrentModel}", 3000)
+            
+            # Set preset to "Custom"
+            Index = self.PresetCombo.findText("Custom")
+            if Index >= 0:
+                self.PresetCombo.setCurrentIndex(Index)
+            
+            # Check if now matches a preset
+            if self.StateManager:
+                self._CheckForMatchingPreset(Params)
+            
+            # Emit signal
+            self.ParametersApplied.emit(Params)
+        else:
+            # Show error message
+            QMessageBox.warning(
+                self,
+                "Update Error",
+                f"Failed to update parameters for {self.CurrentModel}"
+            )
+    
+    def _OnResetToOriginal(self):
+        """Handle reset to original button click."""
+        if not self.CurrentModel or not self.StateManager:
+            return
+        
+        # Reset to original state
+        OriginalParams = self.StateManager.ResetToOriginal(self.CurrentModel)
+        
+        if OriginalParams:
+            # Apply original parameters to controls
+            self._ApplyParametersToControls(OriginalParams)
+            
+            # Update state table
+            self._UpdateStateTable()
+            
+            # Show message
+            if self.StatusBar:
+                self.StatusBar.showMessage("Parameters reset to original values", 3000)
+    
+    def _OnResetToDefault(self):
+        """Handle reset to default button click."""
+        if not self.CurrentModel:
+            return
+        
+        # Get default parameters
+        DefaultParams = self.Config.GetModelConfig('DefaultParameters')
+        
+        # Apply default parameters to controls
+        self._ApplyParametersToControls(DefaultParams)
+        
+        # Update state manager if available
+        if self.StateManager:
+            self.StateManager.UpdateCurrentState(self.CurrentModel, DefaultParams)
+            
+            # Update state table
+            self._UpdateStateTable()
+        
+        # Show message
+        if self.StatusBar:
+            self.StatusBar.showMessage("Parameters reset to default values", 3000)
+
+================
+File: CurrentMods/ParameterStateManager.py
+================
+# File: ParameterStateManager.py
+# Path: OllamaModelEditor/Core/ParameterStateManager.py
+# Standard: AIDEV-PascalCase-1.2
+# Created: 2025-03-13
+# Last Modified: 2025-03-13
+# Description: Simplified parameter state tracking for the OllamaModelEditor application
+
+from typing import Dict, Any, Optional, List, Tuple
+import logging
+import copy
+
+class ParameterStateManager:
+    """Manages and tracks parameter states for models."""
+    
+    def __init__(self, ModelManager, ConfigManager):
+        """
+        Initialize the parameter state manager.
+        
+        Args:
+            ModelManager: Model manager instance
+            ConfigManager: Configuration manager instance
+        """
+        self.Logger = logging.getLogger('OllamaModelEditor.ParameterStateManager')
+        self.ModelManager = ModelManager
+        self.ConfigManager = ConfigManager
+        
+        # Store original and current parameter states
+        self.OriginalStates = {}  # ModelName -> Original parameters
+        self.CurrentStates = {}   # ModelName -> Current parameters
+        
+        # Store model file contents (if available)
+        self.ModelFiles = {}      # ModelName -> Model file content
+    
+    def LoadModelState(self, ModelName: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """
+        Load and track the state for a model.
+        
+        Args:
+            ModelName: Name of the model
+            
+        Returns:
+            Tuple of (original state, current state)
+        """
+        # Get model parameters from configuration
+        ModelParams = self.ConfigManager.GetModelConfig(ModelName)
+        
+        # Store original state if not already stored
+        if ModelName not in self.OriginalStates:
+            self.OriginalStates[ModelName] = copy.deepcopy(ModelParams)
+        
+        # Update current state
+        self.CurrentStates[ModelName] = copy.deepcopy(ModelParams)
+        
+        return (self.OriginalStates[ModelName], self.CurrentStates[ModelName])
+    
+    def UpdateCurrentState(self, ModelName: str, Parameters: Dict[str, Any]) -> None:
+        """
+        Update the current state for a model.
+        
+        Args:
+            ModelName: Name of the model
+            Parameters: Updated parameters
+        """
+        # Ensure model state is loaded
+        if ModelName not in self.CurrentStates:
+            self.LoadModelState(ModelName)
+        
+        # Update current state
+        self.CurrentStates[ModelName].update(Parameters)
+    
+    def GetStateDifferences(self, ModelName: str) -> Dict[str, Tuple[Any, Any]]:
+        """
+        Get differences between original and current states.
+        
+        Args:
+            ModelName: Name of the model
+            
+        Returns:
+            Dictionary mapping parameter names to (original, current) value tuples
+        """
+        if ModelName not in self.OriginalStates or ModelName not in self.CurrentStates:
+            return {}
+        
+        Differences = {}
+        Original = self.OriginalStates[ModelName]
+        Current = self.CurrentStates[ModelName]
+        
+        # Find all parameter keys from both states
+        AllParams = set(Original.keys()) | set(Current.keys())
+        
+        for Param in AllParams:
+            OrigValue = Original.get(Param)
+            CurrValue = Current.get(Param)
+            
+            if OrigValue != CurrValue:
+                Differences[Param] = (OrigValue, CurrValue)
+        
+        return Differences
+    
+    def GetModelFile(self, ModelName: str) -> Optional[Dict[str, Any]]:
+        """
+        Get the model file content if available.
+        
+        Args:
+            ModelName: Name of the model
+            
+        Returns:
+            Dictionary containing model file content or None if not available
+        """
+        return self.ModelFiles.get(ModelName)
+    
+    def GetAllModelParameters(self, ModelName: str) -> Dict[str, Any]:
+        """
+        Get all available parameters for a model.
+        
+        Args:
+            ModelName: Name of the model
+            
+        Returns:
+            Dictionary containing all available parameters
+        """
+        # Start with current state parameters
+        AllParams = copy.deepcopy(self.CurrentStates.get(ModelName, {}))
+        return AllParams
+    
+    def ResetToOriginal(self, ModelName: str) -> Dict[str, Any]:
+        """
+        Reset current state to original state.
+        
+        Args:
+            ModelName: Name of the model
+            
+        Returns:
+            Dictionary containing original parameters
+        """
+        if ModelName in self.OriginalStates:
+            self.CurrentStates[ModelName] = copy.deepcopy(self.OriginalStates[ModelName])
+            return self.CurrentStates[ModelName]
+        return {}
+    
+    def CommitCurrentState(self, ModelName: str) -> bool:
+        """
+        Commit current state as the new original state.
+        
+        Args:
+            ModelName: Name of the model
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if ModelName in self.CurrentStates:
+            # Save current state to configuration
+            self.ConfigManager.SetModelConfig(ModelName, self.CurrentStates[ModelName])
+            
+            # Update original state
+            self.OriginalStates[ModelName] = copy.deepcopy(self.CurrentStates[ModelName])
+            
+            self.Logger.info(f"Committed current state for {ModelName}")
+            return True
+        
+        self.Logger.error(f"Cannot commit state for {ModelName}: no current state")
+        return False
+
+================
+File: CurrentMods/StateManager Integration Guide.md
+================
+# StateManager Integration Guide
+
+This guide provides step-by-step instructions for integrating the new ParameterStateManager into your OllamaModelEditor application to resolve the error you're encountering.
+
+## Overview of Error
+
+The error occurs because you've added the enhanced `ParameterEditor` which now requires a `StateManager` parameter:
+
+```
+TypeError: ParameterEditor.__init__() missing 1 required positional argument: 'StateManager'
+```
+
+## Integration Steps
+
+### 1. Add the ParameterStateManager File
+
+First, create the `ParameterStateManager.py` file in the Core directory:
+
+```
+Core/ParameterStateManager.py
+```
+
+Use the implementation provided in the previous artifact.
+
+### 2. Update Main.py
+
+Modify your `Main.py` file to:
+1. Import the `ParameterStateManager`
+2. Create an instance of it
+3. Pass it to the `MainWindow` constructor
+
+Key changes:
+```python
+# Add import
+from Core.ParameterStateManager import ParameterStateManager
+
+# In the Main() function, add:
+# Create parameter state manager
+try:
+    StateManager = ParameterStateManager(ModelManager, Config)
+except Exception as Error:
+    ShowErrorAndExit("Error creating parameter state manager", Error)
+
+# Update MainWindow creation
+MainWin = MainWindow(Config, StateManager)
+```
+
+### 3. Update MainWindow.py
+
+Modify your `MainWindow.py` file to:
+1. Accept the `StateManager` parameter in the constructor
+2. Store it as an instance variable
+3. Pass it to the `ParameterEditor` and `BenchmarkView` components
+
+Key changes:
+```python
+# Update constructor
+def __init__(self, Config, StateManager):
+    # Store state manager
+    self.StateManager = StateManager
+    
+    # Rest of constructor...
+
+# In _CreateCentralWidget method:
+self.ParameterEditorWidget = ParameterEditor(self.ModelManager, self.Config, self.StateManager)
+self.BenchmarkWidget = BenchmarkView(self.ModelManager, self.Config, self.StateManager)
+```
+
+### 4. Replace Component Implementations
+
+Replace your existing component implementations with the enhanced versions:
+
+1. `GUI/Components/ParameterEditor.py` -> Replace with enhanced version
+2. `GUI/Components/BenchmarkView.py` -> Replace with enhanced version
+
+### 5. Handling Temporary Backward Compatibility (Optional)
+
+If you need a temporary solution before implementing all changes, you can modify the ParameterEditor to make StateManager optional:
+
+```python
+def __init__(self, ModelManager, Config, StateManager=None):
+    # ...
+    self.StateManager = StateManager
+    # ...
+```
+
+Then conditionally use the StateManager functions only if it's available.
+
+## Testing the Integration
+
+After making these changes:
+
+1. Start the application
+2. Verify that the ParameterEditor loads correctly
+3. Test parameter editing and state tracking
+4. Test benchmarking with state information
+
+## Troubleshooting
+
+If you encounter issues after integration:
+
+1. **ImportError**: Ensure the `ParameterStateManager.py` file is correctly placed in the Core directory
+2. **AttributeError**: Check that all required methods are implemented in the StateManager
+3. **UI Issues**: Verify that the updated components are correctly displaying state information
+
+## Next Steps
+
+After successful integration:
+
+1. Implement the model file loading functionality
+2. Enhance the benchmark results display
+3. Add the stress test benchmark implementation
+4. Consider adding parameter optimization suggestions
+
+This integration provides a solid foundation for tracking and displaying parameter states, enhancing the user experience, and improving benchmark functionality.
+
+================
 File: docs/Notes/Additional Features from Original Design and Brainstorming.md
 ================
 # Additional Features from Original Design and Brainstorming
@@ -4160,6 +6843,463 @@ Once the database integration is complete, you can implement several advanced fe
 The database integration transforms OllamaModelEditor from a configuration tool to a comprehensive model management platform. By centralizing data and providing a foundation for advanced features, it significantly enhances the application's capabilities while making the code more maintainable and extensible.
 
 ================
+File: docs/Notes/OllamaModelEditor - Project Status and Roadmap.md
+================
+# OllamaModelEditor - Project Status and Roadmap
+
+## Project Overview
+
+OllamaModelEditor is a comprehensive GUI application designed to customize, optimize, and manage Ollama AI models. It provides an intuitive interface for adjusting model parameters, comparing performance across different configurations, and streamlining AI workflows.
+
+This document outlines the current status of the project, its objectives, development progress, and future roadmap.
+
+## Project Objectives
+
+### Primary Objectives
+
+1. **Provide Intuitive Parameter Editing**
+   - Create a user-friendly GUI for customizing model parameters
+   - Support all major Ollama model parameters (Temperature, TopP, MaxTokens, etc.)
+   - Offer visual guidance for parameter selection
+
+2. **Facilitate Model Performance Benchmarking**
+   - Allow users to compare model performance across different parameter sets
+   - Display meaningful performance metrics
+   - Offer tools to save and analyze benchmark results
+
+3. **Simplify Model Management**
+   - Provide easy access to all locally available Ollama models
+   - Support multiple parameter configurations for each model
+   - Enable configuration import/export
+
+4. **Enhance User Workflow**
+   - Improve interaction with Ollama models through visual tools
+   - Reduce the need for command-line operations
+   - Provide presets for common use cases
+
+### Secondary Objectives
+
+1. **Maintain Consistent Design Standards**
+   - Adhere to the AIDEV-PascalCase-1.2 standard throughout the codebase
+   - Ensure consistent visual design across the application
+   - Create a distinctive developer fingerprint
+
+2. **Implement Robust Data Management**
+   - Provide both file-based and database-backed configuration
+   - Track model usage history and benchmark results
+   - Enable data export for external analysis
+
+3. **Support Cross-Platform Usage**
+   - Ensure compatibility with Windows, macOS, and Linux
+   - Maintain consistent user experience across platforms
+   - Handle platform-specific paths and configurations
+
+## Current Development Status
+
+### Completed Components
+
+1. **Core Framework**
+   - ✅ Base application structure with PySide6
+   - ✅ Core configuration management
+   - ✅ Logging system
+   - ✅ Model management interface
+
+2. **Database Integration**
+   - ✅ SQLite database implementation
+   - ✅ Database schema design following PascalCase standards
+   - ✅ Migration tools for database schema
+   - ✅ Fallback to file-based configuration
+
+3. **User Interface Components**
+   - ✅ Main application window
+   - ✅ Model selector sidebar
+   - ✅ Parameter editor interface
+   - ✅ Benchmark view
+   - ✅ Splash screen
+
+4. **Features**
+   - ✅ Basic parameter editing
+   - ✅ Model selection from available Ollama models
+   - ✅ Parameter preset system
+   - ✅ Benchmark functionality
+   - ✅ Configuration saving/loading
+
+### In Progress Components
+
+1. **UI Refinements**
+   - 🔄 Styling improvements for better visual hierarchy
+   - 🔄 Responsive layout for different screen sizes
+   - 🔄 Additional visual feedback for user actions
+
+2. **Feature Enhancements**
+   - 🔄 Advanced parameter analysis tools
+   - 🔄 Visual representation of benchmark results
+   - 🔄 Detailed model information display
+
+3. **Documentation**
+   - 🔄 User guide
+   - 🔄 Developer documentation
+   - 🔄 API reference
+
+### Pending Components
+
+1. **Advanced Features**
+   - ⏳ Generation history viewer
+   - ⏳ Parameter impact analysis
+   - ⏳ Token usage visualization
+   - ⏳ Multi-model comparison tools
+
+2. **User Experience**
+   - ⏳ Theme customization
+   - ⏳ Keyboard shortcuts
+   - ⏳ Context-sensitive help
+
+3. **Platform Integration**
+   - ⏳ Automatic Ollama server detection
+   - ⏳ System integration (file associations, etc.)
+   - ⏳ Update checking/notification
+
+## Future Development Steps
+
+### Short-Term Goals (1-3 months)
+
+1. **Complete UI Refinements**
+   - Finalize application styling
+   - Improve layout responsiveness
+   - Enhance visual feedback for user actions
+
+2. **Implement Advanced Parameter Analysis**
+   - Add parameter impact visualization
+   - Develop comparative analysis tools
+   - Create parameter optimization suggestions
+
+3. **Enhance Documentation**
+   - Complete user guide with examples
+   - Finalize developer documentation
+   - Create video tutorials
+
+4. **Improve Testing**
+   - Expand unit test coverage
+   - Implement UI tests
+   - Create benchmark standardization
+
+### Medium-Term Goals (3-6 months)
+
+1. **Add Generation History Features**
+   - Implement comprehensive history tracking
+   - Create visualization tools for token usage
+   - Develop filtering and search capabilities
+
+2. **Implement Model Comparison Tools**
+   - Create side-by-side model comparison
+   - Develop benchmark visualization
+   - Add statistical analysis of performance
+
+3. **Enhance User Experience**
+   - Implement theme customization
+   - Add keyboard shortcut system
+   - Create context-sensitive help
+
+4. **Improve Platform Integration**
+   - Develop automatic Ollama server detection
+   - Implement system integration features
+   - Create update checking mechanism
+
+### Long-Term Goals (6+ months)
+
+1. **Extend to Advanced Use Cases**
+   - Add support for fine-tuning workflows
+   - Implement dataset management tools
+   - Develop prompt library and management
+
+2. **Create Collaborative Features**
+   - Add configuration sharing capabilities
+   - Implement preset community repository
+   - Create benchmark result sharing
+
+3. **Expand Platform Support**
+   - Consider web interface version
+   - Develop mobile companion app
+   - Create CLI integration tools
+
+4. **Performance Optimization**
+   - Improve memory usage for large models
+   - Optimize database operations
+   - Enhance startup performance
+
+## Suggested Improvements
+
+### Technical Improvements
+
+1. **Code Structure and Architecture**
+   - Implement a more robust plugin architecture for extensibility
+   - Refactor core components to improve separation of concerns
+   - Create comprehensive test suites for all components
+
+2. **Database Enhancements**
+   - Add support for SQLite WAL mode for better concurrency
+   - Implement database versioning and automatic upgrades
+   - Add database compression or cleanup utilities
+
+3. **Performance Optimizations**
+   - Implement lazy loading for UI components
+   - Add caching mechanisms for frequently accessed data
+   - Optimize benchmark operations for multicore processors
+
+4. **Integration Capabilities**
+   - Develop API for external tool integration
+   - Add support for multiple Ollama server connections
+   - Create import/export formats for interoperability with other tools
+
+### User Experience Improvements
+
+1. **Interface Enhancements**
+   - Add customizable dashboard view
+   - Implement drag-and-drop functionality for model management
+   - Create mini mode for compact display
+
+2. **Visualization Tools**
+   - Develop interactive charts for performance comparison
+   - Create visual parameter relationship diagrams
+   - Add real-time performance monitoring
+
+3. **Workflow Improvements**
+   - Implement project-based workflow with saved configurations
+   - Add batch processing capabilities
+   - Create automated testing sequences
+
+4. **Accessibility Features**
+   - Implement keyboard navigation for all features
+   - Add screen reader support
+   - Create high-contrast themes
+
+### Feature Improvements
+
+1. **Model Management**
+   - Add model tagging and organization
+   - Implement version control for configurations
+   - Create model family grouping
+
+2. **Parameter Handling**
+   - Add parameter interdependency visualization
+   - Implement parameter optimization algorithms
+   - Create guided parameter selection wizards
+
+3. **Benchmark System**
+   - Add standard benchmark templates
+   - Implement comparative scoring system
+   - Create benchmark report generation
+
+4. **Data Analysis**
+   - Add statistical analysis of model performance
+   - Implement export to common data analysis formats
+   - Create recommendation engine for parameter optimization
+
+## Conclusion
+
+The OllamaModelEditor project has made significant progress in creating a robust GUI application for Ollama model management. The core architecture is established with a consistent design standard, and many of the fundamental features are implemented.
+
+The immediate focus should be on completing UI refinements, implementing advanced analysis tools, and enhancing documentation. Medium-term goals include expanding the feature set with generation history tracking, model comparison tools, and enhanced user experience. Long-term vision includes advanced use cases, collaborative features, expanded platform support, and performance optimization.
+
+By following this roadmap and implementing the suggested improvements, OllamaModelEditor can become a comprehensive solution for AI model management that enhances productivity and accessibility for both casual users and AI professionals.
+
+================
+File: docs/Notes/OllamaModelEditor Database Integration Guide.md
+================
+# OllamaModelEditor Database Integration Guide
+
+## Overview
+
+This guide explains how the OllamaModelEditor application integrates with its SQLite database and provides information about the PascalCase naming convention used in the database schema.
+
+## Database Schema
+
+The OllamaModelEditor application uses a SQLite database with a schema that follows the AIDEV-PascalCase-1.2 standard. This means all table and column names use PascalCase (e.g., `ModelConfigs`, `ModelName`) instead of the more common snake_case (e.g., `model_configs`, `model_name`).
+
+### Main Tables
+
+- **ModelConfigs**: Stores model configurations
+  - **ID**: Primary key
+  - **ModelName**: Name of the model
+  - **ConfigName**: Name of the configuration
+  - **Temperature**: Model temperature parameter
+  - **TopP**: Top-P parameter
+  - **MaxTokens**: Maximum tokens parameter
+  - **FrequencyPenalty**: Frequency penalty parameter
+  - **PresencePenalty**: Presence penalty parameter
+  - **CreatedAt**: Creation timestamp
+  - **LastUsed**: Last usage timestamp
+  - **IsDefault**: Flag for default configuration
+
+- **Presets**: Stores predefined parameter presets
+  - **ID**: Primary key
+  - **Name**: Preset name
+  - **Description**: Preset description
+  - **Temperature**, **TopP**, **MaxTokens**, etc.: Parameter values
+
+- **UserPresets**: Stores user-defined parameter presets
+  - Similar structure to Presets
+
+- **UserPreferences**: Stores user preferences
+  - **Key**: Preference key
+  - **Value**: Preference value
+  - **ValueType**: Type of the value for conversion
+  - **UpdatedAt**: Last update timestamp
+
+- **AppSettings**: Stores application settings
+  - Similar structure to UserPreferences
+
+- **GenerationHistory**: Stores history of text generations
+  - **ID**: Primary key
+  - **ModelName**: Model used
+  - **Prompt**: Input prompt
+  - **Response**: Generated response
+  - **Temperature**, **TopP**, etc.: Parameters used
+  - **InputTokens**, **OutputTokens**, etc.: Metrics
+  - **CreatedAt**: Timestamp
+
+- **BenchmarkResults**: Stores benchmark results
+  - **ID**: Primary key
+  - **BenchmarkName**: Name of the benchmark
+  - **ModelName**: Model used
+  - **ConfigID**: Reference to configuration
+  - **AverageTime**, **AverageTokens**, etc.: Metrics
+  - **CreatedAt**: Timestamp
+
+## Using the Database
+
+### Command Line Options
+
+The application provides several database-related command line options:
+
+```
+--db PATH               Path to database file
+--migrate               Migrate from file config to database
+--migrate-schema        Migrate database schema to PascalCase
+```
+
+### Basic Usage
+
+1. **First Run with Database**:
+   ```
+   python Main.py --db OllamaModelEditor.db
+   ```
+   This creates a new database if it doesn't exist and initializes all tables.
+
+2. **Migrating from File Configuration**:
+   ```
+   python Main.py --db OllamaModelEditor.db --migrate
+   ```
+   This migrates your existing file-based configuration to the database.
+
+3. **Migrating Database Schema**:
+   ```
+   python Main.py --db OllamaModelEditor.db --migrate-schema
+   ```
+   This migrates an existing database from snake_case to PascalCase schema.
+
+### Migration Scripts
+
+The application includes two migration scripts:
+
+1. **MigrateToDatabase.py**: Migrates configuration from files to database
+   ```
+   python scripts/MigrateToDatabase.py --config config.yaml --db OllamaModelEditor.db
+   ```
+
+2. **MigrateDBToPascalCase.py**: Migrates database schema from snake_case to PascalCase
+   ```
+   python scripts/MigrateDBToPascalCase.py --db OllamaModelEditor.db --backup
+   ```
+   The `--backup` flag creates a backup of your database before migration.
+
+## Benefits of the Database Approach
+
+Using a database for configuration storage provides several advantages:
+
+1. **Centralized Storage**: All application data in one place with a proper schema
+2. **Better Organization**: Structured storage with relationships between data
+3. **Improved Performance**: Faster access to configuration and history
+4. **Enhanced Features**: History tracking, benchmarking, and analytics
+5. **Better Multi-Model Support**: Easier to manage multiple models and configurations
+6. **Simplified Backup**: Single file to back up and restore
+
+## Backwards Compatibility
+
+The application maintains backward compatibility with file-based configuration:
+
+- If no database is specified, the application falls back to file-based configuration
+- Configuration can be exported from the database to files
+- The application can run with either approach
+
+## For Developers
+
+If you're developing or extending the OllamaModelEditor application, keep these points in mind:
+
+1. **PascalCase Consistency**: All database field references should use PascalCase
+2. **SQL Queries**: Ensure all SQL queries use PascalCase column names
+3. **DBManager Class**: Use the `DBManager` class for all database interactions
+4. **Migration Support**: Maintain support for both file and database configurations
+5. **Error Handling**: Implement proper error handling for database operations
+
+### Example Code
+
+```python
+# Correct way to interact with the database
+ModelConfigs = DB.ExecuteQuery(
+    """
+    SELECT ModelName, ConfigName, Temperature, TopP, MaxTokens
+    FROM ModelConfigs
+    WHERE ModelName = ?
+    """,
+    (ModelName,)
+)
+
+# Correct way to update the database
+DB.ExecuteNonQuery(
+    """
+    UPDATE ModelConfigs
+    SET LastUsed = CURRENT_TIMESTAMP
+    WHERE ModelName = ? AND ConfigName = ?
+    """,
+    (ModelName, ConfigName)
+)
+```
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Database Not Found**:
+   - Check the path specified with `--db`
+   - Ensure the directory exists and is writable
+
+2. **Migration Errors**:
+   - Use the `--backup` flag to create a backup before migration
+   - Check logs for specific error messages
+   - Restore from backup if necessary
+
+3. **Permission Issues**:
+   - Ensure you have write permissions for the database file and directory
+
+### Database Inspection
+
+You can inspect the database structure and content using SQLite tools:
+
+```
+sqlite3 OllamaModelEditor.db ".schema"  # Show schema
+sqlite3 OllamaModelEditor.db "SELECT * FROM ModelConfigs"  # Query data
+```
+
+For a graphical interface, we recommend using [DB Browser for SQLite](https://sqlitebrowser.org/).
+
+## Conclusion
+
+The OllamaModelEditor database integration provides a robust foundation for managing model configurations, user preferences, and benchmarking results. By following the AIDEV-PascalCase-1.2 standard, it maintains a consistent visual fingerprint throughout the codebase while offering enhanced functionality and performance.
+
+If you encounter any issues or have questions about the database integration, please refer to the project documentation or open an issue on the project repository.
+
+================
 File: docs/Notes/OllamaModelEditor UI and Feature Implementation Plan.md
 ================
 # OllamaModelEditor UI and Feature Implementation Plan
@@ -4272,6 +7412,288 @@ Based on our brainstorming and the original design, here's a comprehensive plan 
 - Test error scenarios and recovery
 
 ================
+File: docs/parameter-editor.py
+================
+# File: ParameterEditor.py
+# Path: OllamaModelEditor/GUI/Components/ParameterEditor.py
+# Standard: AIDEV-PascalCase-1.2
+# Created: 2025-03-11
+# Last Modified: 2025-03-12 15:00PM
+# Description: Parameter editing component for the OllamaModelEditor application
+
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QGridLayout, QSlider, QSpinBox, 
+    QDoubleSpinBox, QHBoxLayout, QComboBox, QPushButton, QFrame,
+    QFormLayout, QMessageBox, QDialog, QDialogButtonBox, QLineEdit,
+    QTextEdit, QGroupBox
+)
+from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtGui import QFont
+
+from typing import Dict, Any, Optional, List
+
+class ParameterEditor(QWidget):
+    """Widget for editing model parameters."""
+    
+    # Signal emitted when parameters are updated
+    ParametersUpdated = Signal(dict)
+    
+    def __init__(self, ModelManager, Config):
+        """
+        Initialize the parameter editor.
+        
+        Args:
+            ModelManager: Model manager instance
+            Config: Configuration manager instance
+        """
+        super().__init__()
+        
+        # Store references
+        self.ModelManager = ModelManager
+        self.Config = Config
+        self.DB = getattr(Config, 'DB', None)
+        self.CurrentModel = None
+        self.Parameters = {}
+        self.ParameterControls = {}
+        
+        # Set up UI
+        self._SetupUI()
+    
+    def _SetupUI(self):
+        """Set up the user interface."""
+        # Create layout
+        Layout = QVBoxLayout()
+        self.setLayout(Layout)
+        
+        # Add header layout
+        HeaderLayout = QHBoxLayout()
+        
+        # Add header label
+        HeaderLabel = QLabel("Model Parameters")
+        HeaderLabel.setStyleSheet("font-weight: bold; font-size: 14px;")
+        HeaderLayout.addWidget(HeaderLabel)
+        
+        # Add stretch to push preset controls to right
+        HeaderLayout.addStretch()
+        
+        # Add preset selector
+        PresetLabel = QLabel("Preset:")
+        HeaderLayout.addWidget(PresetLabel)
+        
+        self.PresetCombo = QComboBox()
+        self.PresetCombo.currentTextChanged.connect(self._OnPresetSelected)
+        HeaderLayout.addWidget(self.PresetCombo)
+        
+        self.SavePresetButton = QPushButton("Save Preset")
+        self.SavePresetButton.clicked.connect(self._OnSavePreset)
+        HeaderLayout.addWidget(self.SavePresetButton)
+        
+        Layout.addLayout(HeaderLayout)
+        
+        # Add separator line
+        Separator = QFrame()
+        Separator.setFrameShape(QFrame.HLine)
+        Separator.setFrameShadow(QFrame.Sunken)
+        Layout.addWidget(Separator)
+        
+        # Create parameters frame with scrolling
+        self.ParametersFrame = QFrame()
+        
+        # Create parameters layout
+        self.ParametersLayout = QFormLayout(self.ParametersFrame)
+        self.ParametersLayout.setVerticalSpacing(12)
+        self.ParametersLayout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        
+        # Add placeholder message
+        self.PlaceholderLabel = QLabel("Select a model to edit parameters")
+        self.PlaceholderLabel.setAlignment(Qt.AlignCenter)
+        self.ParametersLayout.addRow(self.PlaceholderLabel)
+        
+        Layout.addWidget(self.ParametersFrame)
+        
+        # Create parameter description section
+        DescriptionFrame = QFrame()
+        DescriptionLayout = QVBoxLayout(DescriptionFrame)
+        
+        DescriptionLabel = QLabel("Parameter Description")
+        DescriptionLabel.setStyleSheet("font-weight: bold;")
+        DescriptionLayout.addWidget(DescriptionLabel)
+        
+        self.DescriptionText = QTextEdit()
+        self.DescriptionText.setReadOnly(True)
+        self.DescriptionText.setMaximumHeight(100)
+        self.DescriptionText.setPlaceholderText("Select a parameter to see its description")
+        DescriptionLayout.addWidget(self.DescriptionText)
+        
+        Layout.addWidget(DescriptionFrame)
+        
+        # Add buttons layout
+        ButtonsLayout = QHBoxLayout()
+        
+        self.ApplyButton = QPushButton("Apply Changes")
+        self.ApplyButton.clicked.connect(self._OnApplyChanges)
+        self.ApplyButton.setEnabled(False)
+        ButtonsLayout.addWidget(self.ApplyButton)
+        
+        self.ResetButton = QPushButton("Reset to Default")
+        self.ResetButton.clicked.connect(self._OnResetToDefault)
+        self.ResetButton.setEnabled(False)
+        ButtonsLayout.addWidget(self.ResetButton)
+        
+        Layout.addLayout(ButtonsLayout)
+        
+        # Load presets
+        self._LoadPresets()
+    
+    def _LoadPresets(self):
+        """Load parameter presets."""
+        # Clear combo box
+        self.PresetCombo.clear()
+        
+        # Add standard presets
+        self.PresetCombo.addItem("Custom")
+        
+        # Add standard presets from database or fallback to hardcoded
+        if self.DB:
+            # Load presets from database
+            try:
+                Presets = self.DB.GetPresets()
+                for Preset in Presets:
+                    self.PresetCombo.addItem(Preset["Name"])
+            except Exception as Error:
+                print(f"Error loading presets from database: {Error}")
+                # Fall back to hardcoded presets
+                self._AddHardcodedPresets()
+        else:
+            # Use hardcoded presets
+            self._AddHardcodedPresets()
+        
+        # Add user presets
+        try:
+            if self.DB:
+                UserPresets = self.ModelManager.GetUserPresets()
+                if UserPresets:
+                    # Add separator
+                    self.PresetCombo.insertSeparator(self.PresetCombo.count())
+                    
+                    # Add user presets
+                    for Preset in UserPresets:
+                        self.PresetCombo.addItem(Preset["Name"] + " (User)")
+        except Exception as Error:
+            print(f"Error loading user presets: {Error}")
+    
+    def _AddHardcodedPresets(self):
+        """Add hardcoded presets to combo box."""
+        StandardPresets = ["Default", "Creative", "Precise", "Fast", "Balanced", "Deterministic"]
+        for Preset in StandardPresets:
+            self.PresetCombo.addItem(Preset)
+    
+    def LoadModel(self, ModelName):
+        """
+        Load a model for editing.
+        
+        Args:
+            ModelName: Name of the model to load
+        """
+        # Store current model
+        self.CurrentModel = ModelName
+        
+        # Hide placeholder
+        self.PlaceholderLabel.setVisible(False)
+        
+        # Clear parameters layout
+        self._ClearParametersLayout()
+        
+        # Get model parameters
+        self.Parameters = self.Config.GetModelConfig(ModelName)
+        
+        # Enable buttons
+        self.ApplyButton.setEnabled(True)
+        self.ResetButton.setEnabled(True)
+        
+        # Get parameter definitions from database or fallback to hardcoded
+        if self.DB:
+            try:
+                # Get parameter definitions from database
+                ParameterDefs = self.DB.GetAllParameters()
+                
+                # Add parameter controls based on definitions
+                if ParameterDefs:
+                    for Param in ParameterDefs:
+                        self._AddParameterControl(
+                            Param["Name"],
+                            Param["DisplayName"],
+                            self.Parameters.get(Param["Name"], Param["DefaultValue"]),
+                            Param["MinValue"],
+                            Param["MaxValue"],
+                            Param["StepSize"],
+                            Param["IsInteger"],
+                            Param["Description"]
+                        )
+                else:
+                    # Fallback to hardcoded parameters
+                    self._AddHardcodedParameters()
+            except Exception as Error:
+                print(f"Error loading parameter definitions: {Error}")
+                # Fallback to hardcoded parameters
+                self._AddHardcodedParameters()
+        else:
+            # Use hardcoded parameters
+            self._AddHardcodedParameters()
+    
+    def _ClearParametersLayout(self):
+        """Clear all parameter controls from layout."""
+        # Clear parameter controls dictionary
+        self.ParameterControls = {}
+        
+        # Remove all items from layout
+        while self.ParametersLayout.count():
+            Item = self.ParametersLayout.takeAt(0)
+            if Item.widget():
+                Item.widget().deleteLater()
+    
+    def _AddHardcodedParameters(self):
+        """Add hardcoded parameter controls."""
+        # Add basic parameters
+        self._AddParameterControl(
+            "Temperature",
+            "Temperature",
+            self.Parameters.get("Temperature", 0.7),
+            0.0, 2.0, 0.1, False,
+            "Controls randomness in text generation. Higher values (0.7-1.0) produce more creative outputs, "
+            "while lower values (0.2-0.5) make output more focused and deterministic."
+        )
+        
+        self._AddParameterControl(
+            "TopP",
+            "Top-P",
+            self.Parameters.get("TopP", 0.9),
+            0.0, 1.0, 0.01, False,
+            "Controls diversity via nucleus sampling. Lower values make output more focused on likely tokens. "
+            "0.9 is a good starting point."
+        )
+        
+        self._AddParameterControl(
+            "MaxTokens",
+            "Max Tokens",
+            self.Parameters.get("MaxTokens", 2048),
+            1, 32000, 1, True,
+            "The maximum length of the generated text. Higher values allow for longer responses "
+            "but consume more resources."
+        )
+        
+        # Add advanced parameters
+        AdvancedGroup = QGroupBox("Advanced Parameters")
+        AdvancedLayout = QFormLayout(AdvancedGroup)
+        
+        # Frequency penalty control
+        FreqPenaltyLayout = QHBoxLayout()
+        FreqPenaltySlider = QSlider(Qt.Horizontal)
+        FreqPenaltySlider.setMinimum(0)
+        FreqPenaltySlider.setMaximum(200)
+        FreqPenaltySlider.setValue(int(self.Parameters.get("FrequencyPenalty",
+
+================
 File: docs/ProjectStructure.txt
 ================
 OllamaModelEditor/
@@ -4373,27 +7795,134 @@ File: GUI/Components/BenchmarkView.py
 # Path: OllamaModelEditor/GUI/Components/BenchmarkView.py
 # Standard: AIDEV-PascalCase-1.2
 # Created: 2025-03-11
-# Last Modified: 2025-03-11
-# Description: Benchmarking component for the OllamaModelEditor application
+# Last Modified: 2025-03-13
+# Description: Enhanced benchmarking component with state tracking for the OllamaModelEditor application
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTextEdit, QPushButton, QHBoxLayout
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, 
+    QFormLayout, QSpinBox, QCheckBox, QTabWidget, QApplication, QFileDialog,
+    QFrame, QGridLayout, QMessageBox, QComboBox, QTableWidget, QTableWidgetItem,
+    QHeaderView, QDialog, QDialogButtonBox, QGroupBox
+)
+from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtGui import QIcon, QFont, QColor
+import json
+import time
+from datetime import datetime
+from typing import Dict, Any, List, Optional
+
+class ModelStateDialog(QDialog):
+    """Dialog to show model state during benchmarking."""
+    
+    def __init__(self, ModelName, StateManager, Parent=None):
+        """
+        Initialize the model state dialog.
+        
+        Args:
+            ModelName: Name of the model
+            StateManager: Parameter state manager instance
+            Parent: Parent widget
+        """
+        super().__init__(Parent)
+        
+        self.ModelName = ModelName
+        self.StateManager = StateManager
+        
+        self.setWindowTitle(f"Model State - {ModelName}")
+        self.setMinimumWidth(500)
+        self.setMinimumHeight(400)
+        
+        self._SetupUI()
+    
+    def _SetupUI(self):
+        """Set up the dialog UI."""
+        Layout = QVBoxLayout(self)
+        
+        # Add state information
+        StateLabel = QLabel(f"Current state for model: <b>{self.ModelName}</b>")
+        Layout.addWidget(StateLabel)
+        
+        # Add state table
+        self.StateTable = QTableWidget(0, 3)
+        self.StateTable.setHorizontalHeaderLabels(["Parameter", "Original Value", "Current Value"])
+        self.StateTable.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.StateTable.verticalHeader().setVisible(False)
+        Layout.addWidget(self.StateTable)
+        
+        # Update state table
+        self._UpdateStateTable()
+        
+        # Add button box
+        ButtonBox = QDialogButtonBox(QDialogButtonBox.Ok)
+        ButtonBox.accepted.connect(self.accept)
+        Layout.addWidget(ButtonBox)
+    
+    def _UpdateStateTable(self):
+        """Update the state changes table."""
+        # Get state differences
+        Differences = self.StateManager.GetStateDifferences(self.ModelName)
+        
+        # Get all parameters
+        AllParams = self.StateManager.GetAllModelParameters(self.ModelName)
+        
+        # Clear table
+        self.StateTable.setRowCount(0)
+        
+        # Add all parameters to table
+        Row = 0
+        for Param, Value in AllParams.items():
+            self.StateTable.insertRow(Row)
+            
+            # Add parameter name
+            ParamItem = QTableWidgetItem(Param)
+            ParamItem.setFlags(ParamItem.flags() & ~Qt.ItemIsEditable)
+            self.StateTable.setItem(Row, 0, ParamItem)
+            
+            # Get original and current values
+            OrigValue = self.StateManager.OriginalStates.get(self.ModelName, {}).get(Param, Value)
+            CurrValue = self.StateManager.CurrentStates.get(self.ModelName, {}).get(Param, Value)
+            
+            # Add original value
+            OrigItem = QTableWidgetItem(str(OrigValue))
+            OrigItem.setFlags(OrigItem.flags() & ~Qt.ItemIsEditable)
+            self.StateTable.setItem(Row, 1, OrigItem)
+            
+            # Add current value
+            CurrItem = QTableWidgetItem(str(CurrValue))
+            CurrItem.setFlags(CurrItem.flags() & ~Qt.ItemIsEditable)
+            
+            # Highlight if different from original
+            if Param in Differences:
+                CurrItem.setBackground(QColor(255, 255, 0, 100))  # Light yellow highlight
+            
+            self.StateTable.setItem(Row, 2, CurrItem)
+            
+            Row += 1
 
 class BenchmarkView(QWidget):
-    """Widget for benchmarking models."""
+    """Widget for benchmarking models with state tracking."""
     
-    def __init__(self, ModelManager, Config):
+    def __init__(self, ModelManager, Config, StateManager):
         """
         Initialize the benchmark view.
         
         Args:
             ModelManager: Model manager instance
             Config: Configuration manager instance
+            StateManager: Parameter state manager instance
         """
         super().__init__()
         
         # Store references
         self.ModelManager = ModelManager
         self.Config = Config
+        self.StateManager = StateManager
+        
+        # Current benchmark results
+        self.CurrentResults = None
+        
+        # Running benchmark flag
+        self.IsRunning = False
         
         # Set up UI
         self._SetupUI()
@@ -4405,37 +7934,180 @@ class BenchmarkView(QWidget):
         self.setLayout(Layout)
         
         # Add header label
-        HeaderLabel = QLabel("Model Benchmark:")
+        HeaderLabel = QLabel("Model Benchmark")
+        HeaderLabel.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 10px;")
         Layout.addWidget(HeaderLabel)
+        
+        # Add description
+        DescriptionLabel = QLabel(
+            "Compare model performance with different configurations. "
+            "Enter sample prompts below to test how the model responds with current settings."
+        )
+        DescriptionLabel.setWordWrap(True)
+        Layout.addWidget(DescriptionLabel)
+        
+        # Add benchmark configuration section
+        ConfigFrame = QFrame()
+        ConfigFrame.setFrameShape(QFrame.StyledPanel)
+        ConfigLayout = QFormLayout(ConfigFrame)
+        
+        # Add model state view button
+        self.ViewStateButton = QPushButton("View Current Model State")
+        self.ViewStateButton.clicked.connect(self._OnViewModelState)
+        ConfigLayout.addRow(self.ViewStateButton)
+        
+        # Add benchmark type selector
+        BenchmarkTypeLayout = QHBoxLayout()
+        BenchmarkTypeLabel = QLabel("Benchmark Type:")
+        self.BenchmarkTypeCombo = QComboBox()
+        self.BenchmarkTypeCombo.addItems(["Standard", "Comparison", "Stress Test"])
+        self.BenchmarkTypeCombo.currentTextChanged.connect(self._OnBenchmarkTypeChanged)
+        BenchmarkTypeLayout.addWidget(BenchmarkTypeLabel)
+        BenchmarkTypeLayout.addWidget(self.BenchmarkTypeCombo)
+        ConfigLayout.addRow(BenchmarkTypeLayout)
+        
+        # Add model comparison selector
+        self.CompareCheckbox = QCheckBox("Compare with another configuration")
+        self.CompareCheckbox.toggled.connect(self._OnCompareToggled)
+        ConfigLayout.addRow(self.CompareCheckbox)
+        
+        # Add comparison config selector (initially hidden)
+        self.ComparisonConfigLayout = QHBoxLayout()
+        self.ComparisonConfigLabel = QLabel("Comparison config:")
+        self.ComparisonConfigLabel.setEnabled(False)
+        self.ComparisonConfigCombo = QComboBox()
+        self.ComparisonConfigCombo.setEnabled(False)
+        self.ComparisonConfigCombo.addItems(["Default", "Creative", "Precise", "Fast", "Custom..."])
+        self.ComparisonConfigLayout.addWidget(self.ComparisonConfigLabel)
+        self.ComparisonConfigLayout.addWidget(self.ComparisonConfigCombo, 1)
+        ConfigLayout.addRow(self.ComparisonConfigLayout)
+        
+        # Add repetition control
+        RepetitionLayout = QHBoxLayout()
+        self.RepetitionLabel = QLabel("Repetitions:")
+        self.RepetitionSpinner = QSpinBox()
+        self.RepetitionSpinner.setMinimum(1)
+        self.RepetitionSpinner.setMaximum(10)
+        self.RepetitionSpinner.setValue(3)
+        self.RepetitionSpinner.setToolTip("Number of times to run each prompt for more accurate benchmarking")
+        RepetitionLayout.addWidget(self.RepetitionLabel)
+        RepetitionLayout.addWidget(self.RepetitionSpinner)
+        RepetitionLayout.addStretch()
+        ConfigLayout.addRow(RepetitionLayout)
+        
+        Layout.addWidget(ConfigFrame)
         
         # Add prompt input
         PromptLabel = QLabel("Enter benchmark prompts (one per line):")
         Layout.addWidget(PromptLabel)
         
         self.PromptsText = QTextEdit()
-        self.PromptsText.setPlaceholderText("Enter benchmark prompts here...")
+        self.PromptsText.setPlaceholderText("Enter benchmark prompts here...\n\nExample:\nSummarize the key features of neural networks.\nExplain the difference between supervised and unsupervised learning.\nWrite a short poem about artificial intelligence.")
+        self.PromptsText.setMinimumHeight(100)
         Layout.addWidget(self.PromptsText)
         
         # Add buttons
         ButtonLayout = QHBoxLayout()
         
         self.RunButton = QPushButton("Run Benchmark")
+        self.RunButton.setIcon(QIcon.fromTheme("media-playback-start"))
         self.RunButton.clicked.connect(self._OnRunBenchmark)
         ButtonLayout.addWidget(self.RunButton)
         
+        self.StopButton = QPushButton("Stop")
+        self.StopButton.setIcon(QIcon.fromTheme("media-playback-stop"))
+        self.StopButton.clicked.connect(self._OnStopBenchmark)
+        self.StopButton.setEnabled(False)
+        ButtonLayout.addWidget(self.StopButton)
+        
         self.SaveButton = QPushButton("Save Results")
+        self.SaveButton.setIcon(QIcon.fromTheme("document-save"))
         self.SaveButton.clicked.connect(self._OnSaveResults)
+        self.SaveButton.setEnabled(False)
         ButtonLayout.addWidget(self.SaveButton)
         
         Layout.addLayout(ButtonLayout)
         
-        # Add results display
-        ResultsLabel = QLabel("Benchmark Results:")
-        Layout.addWidget(ResultsLabel)
+        # Add results display with tabs
+        self.ResultsTabs = QTabWidget()
         
-        self.ResultsText = QTextEdit()
-        self.ResultsText.setReadOnly(True)
-        Layout.addWidget(self.ResultsText)
+        # Summary tab
+        self.SummaryTab = QWidget()
+        SummaryLayout = QVBoxLayout(self.SummaryTab)
+        
+        self.SummaryText = QTextEdit()
+        self.SummaryText.setReadOnly(True)
+        SummaryLayout.addWidget(self.SummaryText)
+        
+        # Charts tab
+        self.ChartsTab = QWidget()
+        ChartsLayout = QVBoxLayout(self.ChartsTab)
+        
+        self.ChartPlaceholder = QLabel("Charts will appear here after running benchmarks")
+        self.ChartPlaceholder.setAlignment(Qt.AlignCenter)
+        ChartsLayout.addWidget(self.ChartPlaceholder)
+        
+        # Detailed results tab
+        self.DetailsTab = QWidget()
+        DetailsLayout = QVBoxLayout(self.DetailsTab)
+        
+        self.DetailsText = QTextEdit()
+        self.DetailsText.setReadOnly(True)
+        DetailsLayout.addWidget(self.DetailsText)
+        
+        # Add tabs to tab widget
+        self.ResultsTabs.addTab(self.SummaryTab, "Summary")
+        self.ResultsTabs.addTab(self.ChartsTab, "Charts")
+        self.ResultsTabs.addTab(self.DetailsTab, "Details")
+        
+        Layout.addWidget(self.ResultsTabs)
+    
+    def _OnBenchmarkTypeChanged(self, BenchmarkType):
+        """
+        Handle benchmark type change.
+        
+        Args:
+            BenchmarkType: Selected benchmark type
+        """
+        # Enable/disable controls based on benchmark type
+        if BenchmarkType == "Comparison":
+            self.CompareCheckbox.setChecked(True)
+            self.CompareCheckbox.setEnabled(False)
+        elif BenchmarkType == "Stress Test":
+            self.CompareCheckbox.setChecked(False)
+            self.CompareCheckbox.setEnabled(False)
+            
+            # TODO: Add stress test specific controls
+        else:  # Standard
+            self.CompareCheckbox.setEnabled(True)
+    
+    def _OnViewModelState(self):
+        """Handle view model state button click."""
+        # Get current model
+        CurrentModel = self.ModelManager.GetCurrentModel()
+        if not CurrentModel:
+            QMessageBox.warning(
+                self,
+                "No Model Selected",
+                "Please select a model first."
+            )
+            return
+        
+        ModelName = CurrentModel.get('name')
+        
+        # Show model state dialog
+        Dialog = ModelStateDialog(ModelName, self.StateManager, self)
+        Dialog.exec()
+    
+    def _OnCompareToggled(self, Checked):
+        """
+        Handle compare checkbox toggle.
+        
+        Args:
+            Checked: Whether the checkbox is checked
+        """
+        self.ComparisonConfigLabel.setEnabled(Checked)
+        self.ComparisonConfigCombo.setEnabled(Checked)
     
     def _OnRunBenchmark(self):
         """Handle run benchmark button click."""
@@ -4444,28 +8116,388 @@ class BenchmarkView(QWidget):
         Prompts = [p.strip() for p in PromptText.split('\n') if p.strip()]
         
         if not Prompts:
-            self.ResultsText.setText("Please enter at least one prompt.")
+            self.SummaryText.setText("Please enter at least one prompt.")
             return
         
         # Get current model
         CurrentModel = self.ModelManager.GetCurrentModel()
         if not CurrentModel:
-            self.ResultsText.setText("Please select a model first.")
+            self.SummaryText.setText("Please select a model first.")
             return
         
         ModelName = CurrentModel.get('name')
         
-        # Run benchmark
-        self.ResultsText.setText(f"Running benchmark for {ModelName}...\n")
+        # Get benchmark repetitions
+        Repetitions = self.RepetitionSpinner.value()
         
-        # This would be replaced with actual benchmark implementation
-        self.ResultsText.append("Benchmark functionality not yet implemented.")
-        self.ResultsText.append("This is a placeholder for the actual benchmark.")
+        # Get benchmark type
+        BenchmarkType = self.BenchmarkTypeCombo.currentText()
+        
+        # Check if comparing configurations
+        ComparisonConfig = None
+        if BenchmarkType == "Comparison" or self.CompareCheckbox.isChecked():
+            ComparisonConfigName = self.ComparisonConfigCombo.currentText()
+            
+            # Get configuration parameters
+            if ComparisonConfigName == "Custom...":
+                # TODO: Implement custom configuration dialog
+                QMessageBox.information(
+                    self,
+                    "Not Implemented",
+                    "Custom comparison configuration is not yet implemented."
+                )
+                return
+            elif ComparisonConfigName in ["Default", "Creative", "Precise", "Fast"]:
+                # Use built-in preset
+                ComparisonConfig = self.ModelManager.GetPresetParameters(ComparisonConfigName)
+        
+        # Get current parameter state for reference
+        CurrentState = self.StateManager.CurrentStates.get(ModelName, {})
+        
+        # Disable run button and enable stop button
+        self.RunButton.setEnabled(False)
+        self.StopButton.setEnabled(True)
+        self.IsRunning = True
+        
+        # Update status
+        self.SummaryText.setText(f"Running benchmark for {ModelName}...\n")
+        self.SummaryText.append(f"Using the following parameters:\n")
+        for Param, Value in CurrentState.items():
+            self.SummaryText.append(f"  • {Param}: {Value}")
+        self.SummaryText.append("\n")
+        QApplication.processEvents()
+        
+        # Run benchmark
+        Results = self.ModelManager.BenchmarkModel(ModelName, Prompts, Runs=Repetitions)
+        
+        # Set model state information in results
+        Results["model_state"] = {
+            "original": self.StateManager.OriginalStates.get(ModelName, {}),
+            "current": CurrentState
+        }
+        
+        # If comparing, run benchmark with comparison configuration
+        if ComparisonConfig:
+            self.SummaryText.append(f"Running comparison benchmark with {ComparisonConfigName} configuration...\n")
+            self.SummaryText.append(f"Using the following parameters:\n")
+            for Param, Value in ComparisonConfig.items():
+                self.SummaryText.append(f"  • {Param}: {Value}")
+            self.SummaryText.append("\n")
+            QApplication.processEvents()
+            
+            ComparisonResults = self.ModelManager.BenchmarkModel(
+                ModelName, 
+                Prompts, 
+                Parameters=ComparisonConfig,
+                Runs=Repetitions
+            )
+            
+            # Add comparison results
+            Results["comparison"] = ComparisonResults
+            Results["comparison_config_name"] = ComparisonConfigName
+        
+        # For stress test, add additional metrics
+        if BenchmarkType == "Stress Test":
+            # TODO: Implement stress test specific metrics
+            pass
+        
+        # Enable run button and disable stop button
+        self.RunButton.setEnabled(True)
+        self.StopButton.setEnabled(False)
+        self.IsRunning = False
+        
+        if "error" in Results:
+            self.SummaryText.setText(f"Error running benchmark: {Results['error']}")
+            return
+        
+        # Store current results
+        self.CurrentResults = Results
+        
+        # Display summary results
+        self._DisplayBenchmarkSummary(Results)
+        
+        # Create charts
+        self._CreateBenchmarkCharts(Results)
+        
+        # Display detailed results
+        self._DisplayBenchmarkDetails(Results)
+        
+        # Enable save button
+        self.SaveButton.setEnabled(True)
+    
+    def _OnStopBenchmark(self):
+        """Handle stop benchmark button click."""
+        # Set flag to stop benchmark
+        self.IsRunning = False
+        
+        # Update status
+        self.SummaryText.append("Stopping benchmark...\n")
+        
+        # Enable run button and disable stop button
+        self.RunButton.setEnabled(True)
+        self.StopButton.setEnabled(False)
+    
+    def _DisplayBenchmarkSummary(self, Results):
+        """
+        Display benchmark summary.
+        
+        Args:
+            Results: Benchmark results
+        """
+        Summary = Results.get('summary', {})
+        Model = Results.get('model', 'Unknown')
+        Parameters = Results.get('parameters', {})
+        ModelState = Results.get('model_state', {})
+        
+        SummaryText = f"<h2>Benchmark Results for {Model}</h2>\n"
+        
+        # Add benchmark type
+        BenchmarkType = self.BenchmarkTypeCombo.currentText()
+        SummaryText += f"<p><b>Benchmark Type:</b> {BenchmarkType}</p>\n"
+        
+        # Add model state information
+        SummaryText += "<h3>Model Parameters</h3>\n"
+        
+        # Create table for parameters with highlighting for changed values
+        SummaryText += "<table border='1' cellpadding='4' cellspacing='0' style='border-collapse: collapse;'>\n"
+        SummaryText += "<tr><th>Parameter</th><th>Original Value</th><th>Benchmark Value</th></tr>\n"
+        
+        # Get parameter differences
+        OriginalState = ModelState.get('original', {})
+        CurrentState = ModelState.get('current', {})
+        
+        # Show all parameters used in the benchmark
+        for Param, Value in Parameters.items():
+            OrigValue = OriginalState.get(Param, Value)
+            
+            # Check if value is different from original
+            IsDifferent = OrigValue != Value
+            
+            # Create row with highlighting if different
+            if IsDifferent:
+                SummaryText += f"<tr><td>{Param}</td><td>{OrigValue}</td><td style='background-color: #FFFF99;'>{Value}</td></tr>\n"
+            else:
+                SummaryText += f"<tr><td>{Param}</td><td>{OrigValue}</td><td>{Value}</td></tr>\n"
+        
+        SummaryText += "</table>\n"
+        
+        # Add summary statistics
+        SummaryText += "<h3>Summary Statistics</h3>\n<ul>"
+        SummaryText += f"<li><b>Total Tests:</b> {Summary.get('total_tests', 0)}</li>"
+        SummaryText += f"<li><b>Total Tokens:</b> {Summary.get('total_tokens', 0)}</li>"
+        SummaryText += f"<li><b>Total Time:</b> {Summary.get('total_time', 0):.2f} seconds</li>"
+        SummaryText += f"<li><b>Average Tokens/Second:</b> {Summary.get('average_tokens_per_second', 0):.2f}</li>"
+        SummaryText += f"<li><b>Average Time/Test:</b> {Summary.get('average_time_per_test', 0):.2f} seconds</li>"
+        SummaryText += f"<li><b>Benchmark Date:</b> {Summary.get('benchmark_date', 'Unknown')}</li>"
+        SummaryText += "</ul>\n"
+        
+        # Add comparison results if available
+        if "comparison" in Results:
+            ComparisonResults = Results["comparison"]
+            ComparisonSummary = ComparisonResults.get('summary', {})
+            ComparisonParameters = ComparisonResults.get('parameters', {})
+            ComparisonConfigName = Results.get('comparison_config_name', "Alternative Configuration")
+            
+            SummaryText += f"<h3>Comparison Configuration ({ComparisonConfigName})</h3>\n"
+            
+            # Create table for comparison parameters
+            SummaryText += "<table border='1' cellpadding='4' cellspacing='0' style='border-collapse: collapse;'>\n"
+            SummaryText += "<tr><th>Parameter</th><th>Original Value</th><th>Comparison Value</th></tr>\n"
+            
+            # Show all parameters used in the comparison benchmark
+            for Param, Value in ComparisonParameters.items():
+                OrigValue = Parameters.get(Param, Value)
+                
+                # Check if value is different from original benchmark
+                IsDifferent = OrigValue != Value
+                
+                # Create row with highlighting if different
+                if IsDifferent:
+                    SummaryText += f"<tr><td>{Param}</td><td>{OrigValue}</td><td style='background-color: #FFFF99;'>{Value}</td></tr>\n"
+                else:
+                    SummaryText += f"<tr><td>{Param}</td><td>{OrigValue}</td><td>{Value}</td></tr>\n"
+            
+            SummaryText += "</table>\n"
+            
+            SummaryText += "<h3>Comparison Summary Statistics</h3>\n<ul>"
+            SummaryText += f"<li><b>Total Tokens:</b> {ComparisonSummary.get('total_tokens', 0)}</li>"
+            SummaryText += f"<li><b>Total Time:</b> {ComparisonSummary.get('total_time', 0):.2f} seconds</li>"
+            SummaryText += f"<li><b>Average Tokens/Second:</b> {ComparisonSummary.get('average_tokens_per_second', 0):.2f}</li>"
+            SummaryText += f"<li><b>Average Time/Test:</b> {ComparisonSummary.get('average_time_per_test', 0):.2f} seconds</li>"
+            SummaryText += "</ul>\n"
+            
+            # Add performance comparison
+            BaseTokensPerSecond = Summary.get('average_tokens_per_second', 0)
+            CompTokensPerSecond = ComparisonSummary.get('average_tokens_per_second', 0)
+            
+            if BaseTokensPerSecond > 0 and CompTokensPerSecond > 0:
+                Difference = ((CompTokensPerSecond - BaseTokensPerSecond) / BaseTokensPerSecond) * 100
+                SummaryText += "<h3>Performance Comparison</h3>\n"
+                if Difference > 0:
+                    SummaryText += f"<p>The comparison configuration is <span style='color:green;'><b>{Difference:.2f}%</b> faster</span> than the base configuration.</p>\n"
+                elif Difference < 0:
+                    SummaryText += f"<p>The comparison configuration is <span style='color:red;'><b>{-Difference:.2f}%</b> slower</span> than the base configuration.</p>\n"
+                else:
+                    SummaryText += "<p>The comparison configuration has the same performance as the base configuration.</p>\n"
+        
+        # Update summary tab
+        self.SummaryText.setHtml(SummaryText)
+    
+    def _CreateBenchmarkCharts(self, Results):
+        """
+        Create benchmark charts.
+        
+        Args:
+            Results: Benchmark results
+        """
+        Tests = Results.get('tests', [])
+        
+        if not Tests:
+            return
+        
+        # Clear charts tab
+        self.ChartPlaceholder.setVisible(False)
+        
+        # Create a layout for the charts if it doesn't exist
+        if not hasattr(self, 'ChartsLayout'):
+            self.ChartsLayout = QVBoxLayout(self.ChartsTab)
+        else:
+            # Clear existing layout
+            while self.ChartsLayout.count():
+                Item = self.ChartsLayout.takeAt(0)
+                if Item.widget():
+                    Item.widget().deleteLater()
+        
+        # Create charts
+        # This is a placeholder - in a real implementation, we would use a charting library
+        # For now, we'll create a text-based chart
+        ChartText = QTextEdit()
+        ChartText.setReadOnly(True)
+        
+        ChartContent = "<h3>Tokens Per Second by Prompt</h3>\n"
+        ChartContent += "<pre>\n"
+        
+        # Find max value for scaling
+        MaxTokensPerSecond = max(test.get('tokens_per_second', 0) for test in Tests)
+        ScaleFactor = 50 / (MaxTokensPerSecond if MaxTokensPerSecond > 0 else 1)
+        
+        for i, Test in enumerate(Tests):
+            TokensPerSecond = Test.get('tokens_per_second', 0)
+            BarLength = int(TokensPerSecond * ScaleFactor)
+            Bar = "█" * BarLength
+            
+            ChartContent += f"Prompt {i+1}: {Bar} {TokensPerSecond:.2f} tokens/s\n"
+        
+        ChartContent += "</pre>\n"
+        
+        # Add comparison chart if available
+        if "comparison" in Results:
+            ComparisonResults = Results["comparison"]
+            ComparisonTests = ComparisonResults.get('tests', [])
+            
+            if ComparisonTests:
+                ChartContent += "<h3>Comparison: Tokens Per Second by Prompt</h3>\n"
+                ChartContent += "<pre>\n"
+                
+                # Find max value for scaling
+                CompMaxTokensPerSecond = max(test.get('tokens_per_second', 0) for test in ComparisonTests)
+                MaxValue = max(MaxTokensPerSecond, CompMaxTokensPerSecond)
+                CompScaleFactor = 50 / (MaxValue if MaxValue > 0 else 1)
+                
+                for i, Test in enumerate(ComparisonTests):
+                    TokensPerSecond = Test.get('tokens_per_second', 0)
+                    BarLength = int(TokensPerSecond * CompScaleFactor)
+                    Bar = "█" * BarLength
+                    
+                    ChartContent += f"Prompt {i+1}: {Bar} {TokensPerSecond:.2f} tokens/s\n"
+                
+                ChartContent += "</pre>\n"
+        
+        ChartText.setHtml(ChartContent)
+        self.ChartsLayout.addWidget(ChartText)
+    
+    def _DisplayBenchmarkDetails(self, Results):
+        """
+        Display detailed benchmark results.
+        
+        Args:
+            Results: Benchmark results
+        """
+        Tests = Results.get('tests', [])
+        
+        if not Tests:
+            return
+        
+        DetailsText = "<h3>Detailed Test Results</h3>\n"
+        
+        for i, Test in enumerate(Tests):
+            DetailsText += f"<h4>Prompt {i+1}</h4>\n"
+            DetailsText += f"<p><b>Prompt:</b> {Test.get('prompt', 'Unknown')}</p>\n"
+            DetailsText += "<ul>\n"
+            DetailsText += f"<li><b>Average Time:</b> {Test.get('average_time', 0):.2f} seconds</li>"
+            DetailsText += f"<li><b>Average Tokens:</b> {Test.get('average_tokens', 0):.2f}</li>"
+            DetailsText += f"<li><b>Average Output Tokens:</b> {Test.get('average_output_tokens', 0):.2f}</li>"
+            DetailsText += f"<li><b>Tokens Per Second:</b> {Test.get('tokens_per_second', 0):.2f}</li>"
+            DetailsText += f"<li><b>Successful Runs:</b> {Test.get('successful_runs', 0)}</li>"
+            DetailsText += "</ul>\n"
+        
+        # Add comparison details if available
+        if "comparison" in Results:
+            ComparisonResults = Results["comparison"]
+            ComparisonTests = ComparisonResults.get('tests', [])
+            ComparisonConfigName = Results.get('comparison_config_name', "Alternative Configuration")
+            
+            if ComparisonTests:
+                DetailsText += f"<h3>Comparison Detailed Results ({ComparisonConfigName})</h3>\n"
+                
+                for i, Test in enumerate(ComparisonTests):
+                    DetailsText += f"<h4>Prompt {i+1}</h4>\n"
+                    DetailsText += f"<p><b>Prompt:</b> {Test.get('prompt', 'Unknown')}</p>\n"
+                    DetailsText += "<ul>\n"
+                    DetailsText += f"<li><b>Average Time:</b> {Test.get('average_time', 0):.2f} seconds</li>"
+                    DetailsText += f"<li><b>Average Tokens:</b> {Test.get('average_tokens', 0):.2f}</li>"
+                    DetailsText += f"<li><b>Average Output Tokens:</b> {Test.get('average_output_tokens', 0):.2f}</li>"
+                    DetailsText += f"<li><b>Tokens Per Second:</b> {Test.get('tokens_per_second', 0):.2f}</li>"
+                    DetailsText += f"<li><b>Successful Runs:</b> {Test.get('successful_runs', 0)}</li>"
+                    DetailsText += "</ul>\n"
+        
+        # Update details tab
+        self.DetailsText.setHtml(DetailsText)
     
     def _OnSaveResults(self):
         """Handle save results button click."""
-        # Implementation would go here
-        self.ResultsText.append("\nSaving results functionality not yet implemented.")
+        if not self.CurrentResults:
+            return
+        
+        # Get save file path
+        FilePath, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Benchmark Results",
+            f"benchmark_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            "JSON Files (*.json);;All Files (*.*)"
+        )
+        
+        if not FilePath:
+            return
+        
+        try:
+            # Save results to file
+            with open(FilePath, 'w') as f:
+                json.dump(self.CurrentResults, f, indent=2)
+            
+            # Show success message
+            QMessageBox.information(
+                self,
+                "Save Successful",
+                f"Benchmark results saved to {FilePath}"
+            )
+        except Exception as e:
+            # Show error message
+            QMessageBox.critical(
+                self,
+                "Save Error",
+                f"Error saving benchmark results: {e}"
+            )
 
 ================
 File: GUI/Components/ModelSelector.py
@@ -4552,29 +8584,45 @@ File: GUI/Components/ParameterEditor.py
 # Path: OllamaModelEditor/GUI/Components/ParameterEditor.py
 # Standard: AIDEV-PascalCase-1.2
 # Created: 2025-03-11
-# Last Modified: 2025-03-11
-# Description: Parameter editing component for the OllamaModelEditor application
+# Last Modified: 2025-03-13
+# Description: Parameter editing component with state tracking for the OllamaModelEditor application
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QGridLayout, QSlider, QSpinBox, QDoubleSpinBox
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QSpinBox, QDoubleSpinBox,
+    QPushButton, QGridLayout, QGroupBox, QTextEdit, QComboBox, QMessageBox,
+    QInputDialog, QLineEdit, QFrame, QTabWidget, QScrollArea, QTableWidget,
+    QTableWidgetItem, QHeaderView
+)
+from PySide6.QtCore import Qt, QEvent, Signal, Slot
+from PySide6.QtGui import QIcon, QColor, QFont
+from typing import Dict, Any, Tuple, List, Optional
 
 class ParameterEditor(QWidget):
-    """Widget for editing model parameters."""
+    """Widget for editing model parameters with state tracking."""
     
-    def __init__(self, ModelManager, Config):
+    # Signal emitted when parameters are applied
+    ParametersApplied = Signal(dict)
+    
+    def __init__(self, ModelManager, Config, StateManager):
         """
         Initialize the parameter editor.
         
         Args:
             ModelManager: Model manager instance
             Config: Configuration manager instance
+            StateManager: Parameter state manager instance
         """
         super().__init__()
         
         # Store references
         self.ModelManager = ModelManager
         self.Config = Config
+        self.StateManager = StateManager
         self.CurrentModel = None
+        self.ParameterControls = {}
+        
+        # Access status bar from parent (will be set after initialization)
+        self.StatusBar = None
         
         # Set up UI
         self._SetupUI()
@@ -4585,23 +8633,142 @@ class ParameterEditor(QWidget):
         Layout = QVBoxLayout()
         self.setLayout(Layout)
         
+        # Add header layout with labels and presets
+        HeaderLayout = QHBoxLayout()
+        
         # Add header label
-        HeaderLabel = QLabel("Model Parameters:")
-        Layout.addWidget(HeaderLabel)
+        HeaderLabel = QLabel("Model Parameters")
+        HeaderLabel.setStyleSheet("font-weight: bold; font-size: 14px;")
+        HeaderLayout.addWidget(HeaderLabel)
+        
+        # Add spacer
+        HeaderLayout.addStretch()
+        
+        # Add preset selector
+        PresetLayout = QHBoxLayout()
+        PresetLabel = QLabel("Preset:")
+        self.PresetCombo = QComboBox()
+        self.LoadPresets()  # Populate presets
+        
+        self.SavePresetButton = QPushButton("Save Preset")
+        self.SavePresetButton.setIcon(QIcon.fromTheme("document-save"))
+        self.SavePresetButton.clicked.connect(self._OnSavePreset)
+        
+        PresetLayout.addWidget(PresetLabel)
+        PresetLayout.addWidget(self.PresetCombo)
+        PresetLayout.addWidget(self.SavePresetButton)
+        
+        HeaderLayout.addLayout(PresetLayout)
+        
+        Layout.addLayout(HeaderLayout)
+        
+        # Add tab widget for parameter editing and model file view
+        self.TabWidget = QTabWidget()
+        
+        # Parameters tab
+        self.ParametersTab = QWidget()
+        ParametersLayout = QVBoxLayout(self.ParametersTab)
+        
+        # Create parameters section
+        ParametersGroupBox = QGroupBox("Basic Parameters")
+        ParamLayout = QVBoxLayout(ParametersGroupBox)
         
         # Create parameters grid
         self.ParametersGrid = QGridLayout()
-        Layout.addLayout(self.ParametersGrid)
+        ParamLayout.addLayout(self.ParametersGrid)
         
-        # Add placeholder message
+        ParametersLayout.addWidget(ParametersGroupBox)
+        
+        # Add advanced parameters section
+        AdvancedGroupBox = QGroupBox("Advanced Parameters")
+        AdvancedGroupBox.setCheckable(True)
+        AdvancedGroupBox.setChecked(False)
+        AdvancedLayout = QVBoxLayout(AdvancedGroupBox)
+        
+        # Create advanced parameters grid
+        self.AdvancedParametersGrid = QGridLayout()
+        AdvancedLayout.addLayout(self.AdvancedParametersGrid)
+        
+        ParametersLayout.addWidget(AdvancedGroupBox)
+        
+        # Add parameter description section
+        DescriptionGroupBox = QGroupBox("Parameter Description")
+        DescriptionLayout = QVBoxLayout(DescriptionGroupBox)
+        
+        self.DescriptionText = QTextEdit()
+        self.DescriptionText.setReadOnly(True)
+        self.DescriptionText.setMinimumHeight(100)
+        self.DescriptionText.setPlaceholderText("Select a parameter to see its description")
+        DescriptionLayout.addWidget(self.DescriptionText)
+        
+        ParametersLayout.addWidget(DescriptionGroupBox)
+        
+        # State changes tab
+        self.StateTab = QWidget()
+        StateLayout = QVBoxLayout(self.StateTab)
+        
+        # Add state changes table
+        self.StateTable = QTableWidget(0, 3)  # Rows will be added dynamically
+        self.StateTable.setHorizontalHeaderLabels(["Parameter", "Original Value", "Current Value"])
+        self.StateTable.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.StateTable.verticalHeader().setVisible(False)
+        StateLayout.addWidget(self.StateTable)
+        
+        # Model file tab
+        self.ModelFileTab = QWidget()
+        ModelFileLayout = QVBoxLayout(self.ModelFileTab)
+        
+        self.ModelFileText = QTextEdit()
+        self.ModelFileText.setReadOnly(True)
+        self.ModelFileText.setLineWrapMode(QTextEdit.NoWrap)
+        self.ModelFileText.setFont(QFont("Courier New", 10))
+        ModelFileLayout.addWidget(self.ModelFileText)
+        
+        # Add tabs to the tab widget
+        self.TabWidget.addTab(self.ParametersTab, "Parameters")
+        self.TabWidget.addTab(self.StateTab, "State Changes")
+        self.TabWidget.addTab(self.ModelFileTab, "Model File")
+        
+        Layout.addWidget(self.TabWidget)
+        
+        # Add action buttons
+        ButtonFrame = QFrame()
+        ButtonLayout = QHBoxLayout(ButtonFrame)
+        ButtonLayout.setContentsMargins(0, 10, 0, 0)
+        
+        self.ApplyButton = QPushButton("Apply Changes")
+        self.ApplyButton.setIcon(QIcon.fromTheme("dialog-ok-apply"))
+        self.ApplyButton.clicked.connect(self._OnApplyChanges)
+        ButtonLayout.addWidget(self.ApplyButton)
+        
+        self.ResetButton = QPushButton("Reset to Original")
+        self.ResetButton.setIcon(QIcon.fromTheme("edit-undo"))
+        self.ResetButton.clicked.connect(self._OnResetToOriginal)
+        ButtonLayout.addWidget(self.ResetButton)
+        
+        self.DefaultButton = QPushButton("Reset to Default")
+        self.DefaultButton.setIcon(QIcon.fromTheme("edit-clear"))
+        self.DefaultButton.clicked.connect(self._OnResetToDefault)
+        ButtonLayout.addWidget(self.DefaultButton)
+        
+        Layout.addWidget(ButtonFrame)
+        
+        # Add placeholder message (hidden initially)
         self.PlaceholderLabel = QLabel("Select a model to edit parameters")
         self.PlaceholderLabel.setAlignment(Qt.AlignCenter)
+        self.PlaceholderLabel.setVisible(False)
         Layout.addWidget(self.PlaceholderLabel)
-        
-        # Add stretch to bottom
-        Layout.addStretch()
     
-    def LoadModel(self, ModelName):
+    def SetStatusBar(self, StatusBar):
+        """
+        Set the status bar reference.
+        
+        Args:
+            StatusBar: Status bar widget
+        """
+        self.StatusBar = StatusBar
+    
+    def LoadModel(self, ModelName: str):
         """
         Load a model for editing.
         
@@ -4614,21 +8781,93 @@ class ParameterEditor(QWidget):
         # Hide placeholder
         self.PlaceholderLabel.setVisible(False)
         
+        # Load model state
+        OriginalState, CurrentState = self.StateManager.LoadModelState(ModelName)
+        
         # Clear parameters grid
+        self._ClearParameterGrids()
+        
+        # Clear parameter controls
+        self.ParameterControls = {}
+        
+        # Get parameter descriptions from database if available
+        ParameterDescriptions = {}
+        if self.Config.DB:
+            # Get all parameters
+            Parameters = self.Config.DB.GetAllParameters()
+            for Param in Parameters:
+                ParameterDescriptions[Param['Name']] = Param['Description']
+        
+        # Add parameter controls
+        self._CreateParameterControl(
+            "Temperature", 
+            CurrentState.get('Temperature', 0.7), 
+            0.0, 2.0, 0.1, 
+            False,
+            ParameterDescriptions.get('Temperature', '')
+        )
+        
+        self._CreateParameterControl(
+            "TopP", 
+            CurrentState.get('TopP', 0.9), 
+            0.0, 1.0, 0.01, 
+            False,
+            ParameterDescriptions.get('TopP', '')
+        )
+        
+        self._CreateParameterControl(
+            "MaxTokens", 
+            CurrentState.get('MaxTokens', 2048), 
+            1, 32000, 1, 
+            True,
+            ParameterDescriptions.get('MaxTokens', '')
+        )
+        
+        self._CreateParameterControl(
+            "FrequencyPenalty", 
+            CurrentState.get('FrequencyPenalty', 0.0), 
+            0.0, 2.0, 0.1, 
+            False,
+            ParameterDescriptions.get('FrequencyPenalty', '')
+        )
+        
+        self._CreateParameterControl(
+            "PresencePenalty", 
+            CurrentState.get('PresencePenalty', 0.0), 
+            0.0, 2.0, 0.1, 
+            False,
+            ParameterDescriptions.get('PresencePenalty', '')
+        )
+        
+        # Update state table
+        self._UpdateStateTable()
+        
+        # Update model file view
+        self._UpdateModelFileView()
+        
+        # Set preset to "Custom" (will be updated if it matches a preset)
+        Index = self.PresetCombo.findText("Custom")
+        if Index >= 0:
+            self.PresetCombo.setCurrentIndex(Index)
+        
+        # Check if current state matches a preset
+        self._CheckForMatchingPreset(CurrentState)
+    
+    def _ClearParameterGrids(self):
+        """Clear parameter grid layouts."""
+        # Clear basic parameters grid
         while self.ParametersGrid.count():
             Item = self.ParametersGrid.takeAt(0)
             if Item.widget():
                 Item.widget().deleteLater()
         
-        # Get model parameters
-        ModelParams = self.Config.GetModelConfig(ModelName)
-        
-        # Add parameter controls
-        self._AddParameterControl("Temperature", ModelParams.get('Temperature', 0.7), 0.0, 2.0, 0.1)
-        self._AddParameterControl("TopP", ModelParams.get('TopP', 0.9), 0.0, 1.0, 0.01)
-        self._AddParameterControl("MaxTokens", ModelParams.get('MaxTokens', 2048), 1, 32000, 1, True)
+        # Clear advanced parameters grid
+        while self.AdvancedParametersGrid.count():
+            Item = self.AdvancedParametersGrid.takeAt(0)
+            if Item.widget():
+                Item.widget().deleteLater()
     
-    def _AddParameterControl(self, Name, Value, Min, Max, Step, IsInteger=False):
+    def _CreateParameterControl(self, Name, Value, Min, Max, Step, IsInteger=False, Description=""):
         """
         Add a parameter control to the grid.
         
@@ -4639,13 +8878,19 @@ class ParameterEditor(QWidget):
             Max: Maximum value
             Step: Step size
             IsInteger: Whether the parameter is an integer
+            Description: Parameter description
         """
-        # Determine next row
-        Row = self.ParametersGrid.rowCount()
+        # Determine which grid to use
+        if Name in ["Temperature", "TopP", "MaxTokens"]:
+            Grid = self.ParametersGrid
+            Row = Grid.rowCount()
+        else:
+            Grid = self.AdvancedParametersGrid
+            Row = Grid.rowCount()
         
         # Add label
         Label = QLabel(f"{Name}:")
-        self.ParametersGrid.addWidget(Label, Row, 0)
+        Grid.addWidget(Label, Row, 0)
         
         # Add slider
         Slider = QSlider(Qt.Horizontal)
@@ -4657,7 +8902,7 @@ class ParameterEditor(QWidget):
             Slider.setMinimum(int(Min * 100))
             Slider.setMaximum(int(Max * 100))
             Slider.setValue(int(Value * 100))
-        self.ParametersGrid.addWidget(Slider, Row, 1)
+        Grid.addWidget(Slider, Row, 1)
         
         # Add spin box
         if IsInteger:
@@ -4671,7 +8916,14 @@ class ParameterEditor(QWidget):
             SpinBox.setMaximum(Max)
             SpinBox.setSingleStep(Step)
             SpinBox.setValue(Value)
-        self.ParametersGrid.addWidget(SpinBox, Row, 2)
+            SpinBox.setDecimals(2)
+        Grid.addWidget(SpinBox, Row, 2)
+        
+        # Store parameter description
+        Slider.setProperty("ParameterName", Name)
+        Slider.setProperty("ParameterDescription", Description)
+        SpinBox.setProperty("ParameterName", Name)
+        SpinBox.setProperty("ParameterDescription", Description)
         
         # Connect signals
         if IsInteger:
@@ -4680,6 +8932,389 @@ class ParameterEditor(QWidget):
         else:
             Slider.valueChanged.connect(lambda v: SpinBox.setValue(v / 100))
             SpinBox.valueChanged.connect(lambda v: Slider.setValue(int(v * 100)))
+        
+        # Connect update signals
+        Slider.valueChanged.connect(lambda: self._OnParameterChanged(Name))
+        SpinBox.valueChanged.connect(lambda: self._OnParameterChanged(Name))
+        
+        # Connect description update signals
+        Slider.sliderPressed.connect(lambda: self._UpdateDescription(Name, Description))
+        SpinBox.installEventFilter(self)
+        
+        # Store controls for later access
+        self.ParameterControls[Name] = (Slider, SpinBox)
+    
+    def eventFilter(self, obj, event):
+        """Handle focus events for parameter controls."""
+        if event.type() == QEvent.FocusIn:
+            # If it's a parameter control, update description
+            ParameterName = obj.property("ParameterName")
+            if ParameterName:
+                Description = obj.property("ParameterDescription")
+                self._UpdateDescription(ParameterName, Description)
+        
+        return super().eventFilter(obj, event)
+    
+    def _UpdateDescription(self, ParameterName, Description):
+        """
+        Update the parameter description text.
+        
+        Args:
+            ParameterName: Name of the parameter
+            Description: Description text
+        """
+        # Get parameter descriptions from database if available
+        if self.Config.DB:
+            # Try to get from database
+            Parameter = self.Config.DB.GetParameter(ParameterName)
+            if Parameter and Parameter.get('Description'):
+                Description = Parameter.get('Description')
+        
+        # If no description is available, use predefined descriptions
+        if not Description:
+            Descriptions = {
+                "Temperature": "Controls randomness in text generation. Higher values (0.7-1.0) produce more creative outputs, while lower values (0.2-0.5) make output more focused and deterministic.",
+                "TopP": "Controls diversity via nucleus sampling. Lower values make output more focused on likely tokens. 0.9 is a good starting point.",
+                "MaxTokens": "The maximum length of the generated text. Higher values allow for longer responses but consume more resources.",
+                "FrequencyPenalty": "Reduces repetition by penalizing tokens that have already appeared in the text. Higher values (0.5-1.0) strongly discourage repetition.",
+                "PresencePenalty": "Penalizes tokens that have appeared at all, encouraging the model to discuss new topics. Useful for keeping responses diverse."
+            }
+            Description = Descriptions.get(ParameterName, f"No description available for {ParameterName}")
+        
+        # Update the description text
+        self.DescriptionText.setHtml(f"<h3>{ParameterName}</h3>\n<p>{Description}</p>")
+    
+    def _OnParameterChanged(self, ParameterName):
+        """
+        Handle parameter value change.
+        
+        Args:
+            ParameterName: Name of the changed parameter
+        """
+        if not self.CurrentModel:
+            return
+        
+        # Get current parameter values
+        Params = self._GetParametersFromControls()
+        
+        # Update state manager
+        self.StateManager.UpdateCurrentState(self.CurrentModel, Params)
+        
+        # Update state table
+        self._UpdateStateTable()
+        
+        # Check if current state matches a preset
+        self._CheckForMatchingPreset(Params)
+    
+    def _UpdateStateTable(self):
+        """Update the state changes table."""
+        if not self.CurrentModel:
+            return
+        
+        # Get state differences
+        Differences = self.StateManager.GetStateDifferences(self.CurrentModel)
+        
+        # Clear table
+        self.StateTable.setRowCount(0)
+        
+        # Add differences to table
+        Row = 0
+        for Param, (OrigValue, CurrValue) in Differences.items():
+            self.StateTable.insertRow(Row)
+            
+            # Add parameter name
+            ParamItem = QTableWidgetItem(Param)
+            ParamItem.setFlags(ParamItem.flags() & ~Qt.ItemIsEditable)
+            self.StateTable.setItem(Row, 0, ParamItem)
+            
+            # Add original value
+            OrigItem = QTableWidgetItem(str(OrigValue))
+            OrigItem.setFlags(OrigItem.flags() & ~Qt.ItemIsEditable)
+            self.StateTable.setItem(Row, 1, OrigItem)
+            
+            # Add current value (highlighted)
+            CurrItem = QTableWidgetItem(str(CurrValue))
+            CurrItem.setFlags(CurrItem.flags() & ~Qt.ItemIsEditable)
+            CurrItem.setBackground(QColor(255, 255, 0, 100))  # Light yellow highlight
+            self.StateTable.setItem(Row, 2, CurrItem)
+            
+            Row += 1
+    
+    def _UpdateModelFileView(self):
+        """Update the model file view."""
+        if not self.CurrentModel:
+            return
+        
+        # Get model file content
+        ModelFile = self.StateManager.GetModelFile(self.CurrentModel)
+        
+        if ModelFile:
+            # Format as pretty JSON
+            ModelFileText = json.dumps(ModelFile, indent=2)
+            self.ModelFileText.setText(ModelFileText)
+        else:
+            self.ModelFileText.setText("Model file not available")
+    
+    def LoadPresets(self):
+        """Load available presets into the preset combo box."""
+        self.PresetCombo.clear()
+        
+        # Add "Custom" option (for current state)
+        self.PresetCombo.addItem("Custom")
+        
+        # Add built-in presets
+        BuiltInPresets = ["Default", "Creative", "Precise", "Fast", "Balanced"]
+        for Preset in BuiltInPresets:
+            self.PresetCombo.addItem(Preset)
+        
+        # Add user presets from database if available
+        if self.Config.DB:
+            UserPresets = self.Config.DB.GetUserPresets()
+            for Preset in UserPresets:
+                self.PresetCombo.addItem(Preset.get('Name', 'Unknown'))
+        
+        # Connect signal
+        self.PresetCombo.currentTextChanged.connect(self._OnPresetSelected)
+    
+    def _CheckForMatchingPreset(self, Params):
+        """
+        Check if current parameters match a preset.
+        
+        Args:
+            Params: Current parameters
+        """
+        # Get all presets
+        Presets = self.ModelManager.GetAllPresets()
+        
+        # Compare with each preset
+        for Preset in Presets:
+            PresetName = Preset.get('Name')
+            if PresetName == "Custom":
+                continue
+            
+            PresetParams = self.ModelManager.GetPresetParameters(PresetName)
+            
+            # Check if parameters match
+            Matches = True
+            for Key, Value in PresetParams.items():
+                if Key in Params and abs(Params[Key] - Value) > 0.001:
+                    Matches = False
+                    break
+            
+            if Matches:
+                # Set preset combo to matching preset
+                Index = self.PresetCombo.findText(PresetName)
+                if Index >= 0:
+                    self.PresetCombo.blockSignals(True)
+                    self.PresetCombo.setCurrentIndex(Index)
+                    self.PresetCombo.blockSignals(False)
+                return
+        
+        # If no match found, set to "Custom"
+        Index = self.PresetCombo.findText("Custom")
+        if Index >= 0:
+            self.PresetCombo.blockSignals(True)
+            self.PresetCombo.setCurrentIndex(Index)
+            self.PresetCombo.blockSignals(False)
+    
+    def _OnPresetSelected(self, PresetName):
+        """
+        Handle preset selection.
+        
+        Args:
+            PresetName: Name of the selected preset
+        """
+        if not self.CurrentModel or PresetName == "Custom":
+            return
+        
+        # Get preset parameters
+        PresetParams = self.ModelManager.GetPresetParameters(PresetName)
+        
+        if not PresetParams:
+            return
+        
+        # Apply preset parameters to controls
+        self._ApplyParametersToControls(PresetParams)
+        
+        # Update state manager
+        self.StateManager.UpdateCurrentState(self.CurrentModel, PresetParams)
+        
+        # Update state table
+        self._UpdateStateTable()
+    
+    def _OnSavePreset(self):
+        """Handle save preset button click."""
+        # Get current parameter values
+        Params = self._GetParametersFromControls()
+        
+        # Prompt user for preset name
+        PresetName, OK = QInputDialog.getText(
+            self,
+            "Save Preset",
+            "Enter a name for this preset:",
+            QLineEdit.Normal,
+            ""
+        )
+        
+        if not OK or not PresetName:
+            return
+        
+        # Prompt for description
+        Description, OK = QInputDialog.getText(
+            self,
+            "Preset Description",
+            "Enter a description for this preset:",
+            QLineEdit.Normal,
+            ""
+        )
+        
+        if not OK:
+            Description = ""
+        
+        # Save preset
+        Success = self.ModelManager.SaveUserPreset(PresetName, Description, Params)
+        
+        if Success:
+            # Update preset list
+            self.LoadPresets()
+            
+            # Select the new preset
+            Index = self.PresetCombo.findText(PresetName)
+            if Index >= 0:
+                self.PresetCombo.setCurrentIndex(Index)
+        else:
+            # Show error message
+            QMessageBox.warning(
+                self,
+                "Save Error",
+                "Error saving preset. Please check the logs for details."
+            )
+    
+    def _GetParametersFromControls(self):
+        """
+        Get parameter values from controls.
+        
+        Returns:
+            Dict: Parameter values
+        """
+        Params = {}
+        
+        for Name, (Slider, SpinBox) in self.ParameterControls.items():
+            Params[Name] = SpinBox.value()
+        
+        return Params
+    
+    def _ApplyParametersToControls(self, Params):
+        """
+        Apply parameter values to controls.
+        
+        Args:
+            Params: Dictionary of parameter values
+        """
+        for Name, Value in Params.items():
+            if Name in self.ParameterControls:
+                Slider, SpinBox = self.ParameterControls[Name]
+                
+                # Block signals to prevent recursive updates
+                SpinBox.blockSignals(True)
+                Slider.blockSignals(True)
+                
+                SpinBox.setValue(Value)
+                
+                # Set slider value (scaled for non-integer values)
+                if isinstance(SpinBox, QDoubleSpinBox):
+                    Slider.setValue(int(Value * 100))
+                else:
+                    Slider.setValue(Value)
+                
+                # Unblock signals
+                SpinBox.blockSignals(False)
+                Slider.blockSignals(False)
+        
+        # Trigger parameter changed event for each parameter
+        for Name in Params.keys():
+            if Name in self.ParameterControls:
+                self._OnParameterChanged(Name)
+    
+    def _OnApplyChanges(self):
+        """Handle apply changes button click."""
+        if not self.CurrentModel:
+            return
+        
+        # Get parameter values
+        Params = self._GetParametersFromControls()
+        
+        # Update model parameters
+        Success = self.ModelManager.UpdateModelParameters(self.CurrentModel, Params)
+        
+        if Success:
+            # Commit current state
+            self.StateManager.CommitCurrentState(self.CurrentModel)
+            
+            # Update state table
+            self._UpdateStateTable()
+            
+            # Show success message
+            if self.StatusBar:
+                self.StatusBar.showMessage(f"Parameters updated for {self.CurrentModel}", 3000)
+            
+            # Set preset to "Custom"
+            Index = self.PresetCombo.findText("Custom")
+            if Index >= 0:
+                self.PresetCombo.setCurrentIndex(Index)
+            
+            # Check if now matches a preset
+            self._CheckForMatchingPreset(Params)
+            
+            # Emit signal
+            self.ParametersApplied.emit(Params)
+        else:
+            # Show error message
+            QMessageBox.warning(
+                self,
+                "Update Error",
+                f"Failed to update parameters for {self.CurrentModel}"
+            )
+    
+    def _OnResetToOriginal(self):
+        """Handle reset to original button click."""
+        if not self.CurrentModel:
+            return
+        
+        # Reset to original state
+        OriginalParams = self.StateManager.ResetToOriginal(self.CurrentModel)
+        
+        if OriginalParams:
+            # Apply original parameters to controls
+            self._ApplyParametersToControls(OriginalParams)
+            
+            # Update state table
+            self._UpdateStateTable()
+            
+            # Show message
+            if self.StatusBar:
+                self.StatusBar.showMessage("Parameters reset to original values", 3000)
+    
+    def _OnResetToDefault(self):
+        """Handle reset to default button click."""
+        if not self.CurrentModel:
+            return
+        
+        # Get default parameters
+        DefaultParams = self.Config.GetModelConfig('DefaultParameters')
+        
+        # Apply default parameters to controls
+        self._ApplyParametersToControls(DefaultParams)
+        
+        # Update state manager
+        self.StateManager.UpdateCurrentState(self.CurrentModel, DefaultParams)
+        
+        # Update state table
+        self._UpdateStateTable()
+        
+        # Show message
+        if self.StatusBar:
+            self.StatusBar.showMessage("Parameters reset to default values", 3000)
 
 ================
 File: GUI/Windows/MainWindow.py
@@ -6026,6 +10661,35 @@ if __name__ == "__main__":
     MigrateToDatabase(Args.config, Args.db)
 
 ================
+File: scripts/rename_report.py
+================
+#!/usr/bin/env python3
+import os
+import datetime
+import shutil
+
+# Get the base directory (project root)
+base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Get project name from the base directory
+project_name = os.path.basename(base_dir)
+
+# Generate timestamp in a file-friendly format
+timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+
+# Define source and target files
+source_file = os.path.join(base_dir, "repomix-output.txt")
+target_file = os.path.join(base_dir, f"CodeBase_{project_name}-{timestamp}.txt")
+
+# Check if source file exists
+if os.path.exists(source_file):
+    # Copy the file (original remains intact)
+    shutil.copy2(source_file, target_file)
+    print(f"File copied successfully: {target_file}")
+else:
+    print(f"Error: Source file {source_file} not found")
+
+================
 File: scripts/Setup.bat
 ================
 @echo off
@@ -7345,13 +12009,15 @@ File: Main.py
 # Path: OllamaModelEditor/Main.py
 # Standard: AIDEV-PascalCase-1.2
 # Created: 2025-03-11
-# Last Modified: 2025-03-12 05:45PM
+# Last Modified: 2025-03-13 15:30PM
 # Description: Entry point for the OllamaModelEditor application
 
 import sys
 import logging
+import os
 from pathlib import Path
 import argparse
+import time
 
 # Add project root to path
 ProjectRoot = Path(__file__).resolve().parent
@@ -7360,41 +12026,8 @@ sys.path.append(str(ProjectRoot))
 # Set up basic logging
 logging.basicConfig(level=logging.INFO, 
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-Logger = logging.getLogger('OllamaModelEditor')
-
-# Import Core components first to ensure they're available
-try:
-    from Core.DBManager import DBManager
-    from Core.LoggingUtils import SetupLogging
-    from Core.ConfigManager import ConfigManager
-    Logger.info("Core imports successful")
-except ImportError as e:
-    Logger.error(f"Error importing Core components: {e}")
-    print(f"Error importing Core components: {e}")
-    print("Please make sure all required files are in place.")
-    sys.exit(1)
-
-# Import PySide6 components
-try:
-    from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
-    from PySide6.QtCore import QTimer
-    Logger.info("PySide6 imports successful")
-except ImportError as e:
-    Logger.error(f"Error importing PySide6: {e}")
-    print("Error: PySide6 is required but not installed.")
-    print("Please install dependencies with: pip install -r requirements.txt")
-    sys.exit(1)
-
-# Import GUI components
-try:
-    from GUI.Windows.MainWindow import MainWindow
-    from GUI.Windows.SplashScreen import SplashScreen
-    Logger.info("GUI imports successful")
-except ImportError as e:
-    Logger.error(f"Error importing GUI components: {e}")
-    print(f"Error importing GUI components: {e}")
-    print("Please make sure all required files are in place.")
-    sys.exit(1)
+RootLogger = logging.getLogger('OllamaModelEditor')
+RootLogger.info("Starting OllamaModelEditor")
 
 def ParseCommandLine():
     """
@@ -7407,8 +12040,75 @@ def ParseCommandLine():
     Parser.add_argument("--config", help="Path to configuration file")
     Parser.add_argument("--db", help="Path to database file")
     Parser.add_argument("--migrate", action="store_true", help="Migrate from file config to database")
+    Parser.add_argument("--migrate-schema", action="store_true", help="Migrate database schema to PascalCase")
     Parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     return Parser.parse_args()
+
+def ShowErrorAndExit(Message, Error=None):
+    """
+    Show error message and exit.
+    
+    Args:
+        Message: Error message to display
+        Error: Optional exception object
+    """
+    ErrorText = f"{Message}"
+    if Error:
+        ErrorText += f"\nError: {Error}"
+    
+    RootLogger.error(ErrorText)
+    
+    # Try to show GUI error message if PySide6 is available
+    try:
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        App = QApplication([])
+        QMessageBox.critical(None, "Error", ErrorText)
+    except ImportError:
+        # Fall back to console error
+        print(f"ERROR: {ErrorText}")
+    
+    sys.exit(1)
+
+def MigrateDBSchema(DBPath):
+    """
+    Migrate database schema to PascalCase.
+    
+    Args:
+        DBPath: Path to database file
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # Check if the migration script exists
+        MigrationScriptPath = str(ProjectRoot / "scripts" / "MigrateDBToPascalCase.py")
+        if not os.path.exists(MigrationScriptPath):
+            RootLogger.error(f"Migration script not found: {MigrationScriptPath}")
+            return False
+        
+        # Import and run migration script
+        from scripts.MigrateDBToPascalCase import MigrateDatabase
+        
+        # Create backup first
+        BackupPath = f"{DBPath}.backup_{int(time.time())}"
+        RootLogger.info(f"Creating database backup at {BackupPath}")
+        
+        import shutil
+        shutil.copy2(DBPath, BackupPath)
+        
+        # Run migration
+        RootLogger.info("Starting database schema migration to PascalCase...")
+        Success = MigrateDatabase(DBPath)
+        
+        if Success:
+            RootLogger.info("Database schema migration completed successfully")
+            return True
+        else:
+            RootLogger.error("Database schema migration failed")
+            return False
+    except Exception as Error:
+        RootLogger.error(f"Error migrating database schema: {Error}")
+        return False
 
 def Main():
     """Application entry point."""
@@ -7418,43 +12118,84 @@ def Main():
     # Set log level based on arguments
     LogLevel = logging.DEBUG if Args.debug else logging.INFO
     
-    Logger.info("Starting OllamaModelEditor")
+    # Import Core modules
+    try:
+        from Core.LoggingUtils import SetupLogging
+        Logger = SetupLogging(LogLevel=LogLevel, LogToFile=True)
+        Logger.info("Logging initialized")
+        
+        from Core.DBManager import DBManager
+        from Core.ConfigManager import ConfigManager
+        Logger.info("Core modules imported")
+    except ImportError as Error:
+        ShowErrorAndExit("Failed to import Core modules", Error)
     
-    # Initialize database if using database storage
-    DB = DBManager(Args.db) if DBManager else None
-    Logger.info(f"Database initialized: {DB.DBPath if DB else 'Not using database'}")
+    # Import PySide6 components
+    try:
+        from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QSplashScreen
+        from PySide6.QtCore import QTimer
+        Logger.info("PySide6 modules imported")
+    except ImportError as Error:
+        ShowErrorAndExit("PySide6 is required but not installed.\nPlease install dependencies with: pip install -r requirements.txt", Error)
     
-    # Initialize logging
-    SetupLogging(LogLevel=LogLevel)
+    # Import GUI components
+    try:
+        from GUI.Windows.MainWindow import MainWindow
+        from GUI.Windows.SplashScreen import SplashScreen
+        Logger.info("GUI modules imported")
+    except ImportError as Error:
+        ShowErrorAndExit("Failed to import GUI modules", Error)
+    
+    # Initialize database if path provided
+    DBInstance = None
+    if Args.db:
+        try:
+            # Check if schema migration is requested
+            if Args.migrate_schema and os.path.exists(Args.db):
+                MigrateResult = MigrateDBSchema(Args.db)
+                if not MigrateResult:
+                    Logger.warning("Database schema migration failed, proceeding with existing schema")
+            
+            # Initialize database
+            DBInstance = DBManager(Args.db)
+            Logger.info(f"Database initialized: {DBInstance.DBPath}")
+        except Exception as Error:
+            ShowErrorAndExit(f"Failed to initialize database: {Args.db}", Error)
     
     # Create application
     App = QApplication(sys.argv)
     App.setApplicationName("OllamaModelEditor")
-    App.setOrganizationName("CallMeChewy")
+    App.setOrganizationName("OllamaModelEditor")
     
     # Initialize configuration
     try:
-        Config = ConfigManager(Args.config, DB)
+        Config = ConfigManager(Args.config, DBInstance)
         
         # Migrate from file to database if requested
-        if Args.migrate and DB:
-            Config.MigrateToDatabase(DB)
+        if Args.migrate and DBInstance:
+            try:
+                Logger.info("Migrating configuration from file to database...")
+                Success = Config.MigrateToDatabase(DBInstance)
+                if Success:
+                    Logger.info("Configuration migrated successfully")
+                else:
+                    Logger.warning("Configuration migration failed")
+            except Exception as Error:
+                Logger.error(f"Error migrating configuration: {Error}")
         
+        # Load configuration
         Config.LoadConfig()
         Logger.info("Configuration loaded")
-    except Exception as e:
-        Logger.error(f"Error loading configuration: {e}")
-        QMessageBox.critical(None, "Configuration Error", 
-                            f"Error loading configuration: {e}")
-        return 1
+    except Exception as Error:
+        ShowErrorAndExit("Failed to load configuration", Error)
     
     # Create and display splash screen
     try:
         Splash = SplashScreen()
         Splash.show()
         Logger.info("Splash screen displayed")
-    except Exception as e:
-        Logger.error(f"Error creating splash screen: {e}")
+    except Exception as Error:
+        Logger.error(f"Error creating splash screen: {Error}")
         # Continue without splash screen
         Splash = None
     
@@ -7468,11 +12209,8 @@ def Main():
             QTimer.singleShot(2000, lambda: ShowMainWindow(Splash, MainWin))
         else:
             MainWin.show()
-    except Exception as e:
-        Logger.error(f"Error creating main window: {e}")
-        QMessageBox.critical(None, "Error", 
-                            f"Error creating main window: {e}")
-        return 1
+    except Exception as Error:
+        ShowErrorAndExit("Failed to create main window", Error)
     
     # Start event loop
     Logger.info("Starting application event loop")
@@ -7483,8 +12221,8 @@ def ShowMainWindow(Splash, MainWin):
     try:
         Splash.finish(MainWin)
         MainWin.show()
-    except Exception as e:
-        Logger.error(f"Error showing main window: {e}")
+    except Exception as Error:
+        RootLogger.error(f"Error showing main window: {Error}")
         MainWin.show()
 
 if __name__ == "__main__":
@@ -7613,6 +12351,30 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - This project is a collaboration between human developers and AI assistants
 - Special thanks to the Ollama project for making powerful AI models accessible
 - Developed by Herbert J. Bowers (Herb@BowersWorld.com)
+
+================
+File: rename_report.sh
+================
+#!/bin/bash
+
+# Get the project directory name (basename of current directory)
+PROJECT_NAME=$(basename "$(pwd)")
+
+# Generate timestamp in a file-friendly format
+TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
+
+# Define source and target files
+SOURCE_FILE="repomix-output.txt"
+TARGET_FILE="CodeBase_${PROJECT_NAME}-${TIMESTAMP}.txt"
+
+# Check if source file exists
+if [ -f "$SOURCE_FILE" ]; then
+    # Copy the file (original remains intact)
+    cp "$SOURCE_FILE" "$TARGET_FILE"
+    echo "File copied successfully: $TARGET_FILE"
+else
+    echo "Error: Source file $SOURCE_FILE not found"
+fi
 
 ================
 File: requirements.txt

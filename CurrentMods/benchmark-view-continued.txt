@@ -1,0 +1,720 @@
+# Highlight if different from original
+            if Param in Differences:
+                CurrItem.setBackground(QColor(255, 255, 0, 100))  # Light yellow highlight
+            
+            self.StateTable.setItem(Row, 2, CurrItem)
+            
+            Row += 1
+
+class BenchmarkView(QWidget):
+    """Widget for benchmarking models with state tracking."""
+    
+    def __init__(self, ModelManager, Config, StateManager):
+        """
+        Initialize the benchmark view.
+        
+        Args:
+            ModelManager: Model manager instance
+            Config: Configuration manager instance
+            StateManager: Parameter state manager instance
+        """
+        super().__init__()
+        
+        # Store references
+        self.ModelManager = ModelManager
+        self.Config = Config
+        self.StateManager = StateManager
+        
+        # Current benchmark results
+        self.CurrentResults = None
+        
+        # Running benchmark flag
+        self.IsRunning = False
+        
+        # Benchmark progress
+        self.CurrentPromptIndex = 0
+        self.CurrentRunIndex = 0
+        self.TotalPrompts = 0
+        self.TotalRuns = 0
+        
+        # Set up UI
+        self._SetupUI()
+    
+    def _SetupUI(self):
+        """Set up the user interface."""
+        # Create layout
+        Layout = QVBoxLayout()
+        self.setLayout(Layout)
+        
+        # Add header label
+        HeaderLabel = QLabel("Model Benchmark")
+        HeaderLabel.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 10px;")
+        Layout.addWidget(HeaderLabel)
+        
+        # Add description
+        DescriptionLabel = QLabel(
+            "Compare model performance with different configurations. "
+            "Enter sample prompts below to test how the model responds with current settings."
+        )
+        DescriptionLabel.setWordWrap(True)
+        Layout.addWidget(DescriptionLabel)
+        
+        # Add benchmark configuration section
+        ConfigFrame = QFrame()
+        ConfigFrame.setFrameShape(QFrame.StyledPanel)
+        ConfigLayout = QFormLayout(ConfigFrame)
+        
+        # Add model state view button
+        self.ViewStateButton = QPushButton("View Current Model State")
+        self.ViewStateButton.clicked.connect(self._OnViewModelState)
+        ConfigLayout.addRow(self.ViewStateButton)
+        
+        # Add benchmark type selector
+        BenchmarkTypeLayout = QHBoxLayout()
+        BenchmarkTypeLabel = QLabel("Benchmark Type:")
+        self.BenchmarkTypeCombo = QComboBox()
+        self.BenchmarkTypeCombo.addItems(["Standard", "Comparison", "Stress Test"])
+        self.BenchmarkTypeCombo.currentTextChanged.connect(self._OnBenchmarkTypeChanged)
+        BenchmarkTypeLayout.addWidget(BenchmarkTypeLabel)
+        BenchmarkTypeLayout.addWidget(self.BenchmarkTypeCombo)
+        ConfigLayout.addRow(BenchmarkTypeLayout)
+        
+        # Add model comparison selector
+        self.CompareCheckbox = QCheckBox("Compare with another configuration")
+        self.CompareCheckbox.toggled.connect(self._OnCompareToggled)
+        ConfigLayout.addRow(self.CompareCheckbox)
+        
+        # Add comparison config selector (initially hidden)
+        self.ComparisonConfigLayout = QHBoxLayout()
+        self.ComparisonConfigLabel = QLabel("Comparison config:")
+        self.ComparisonConfigLabel.setEnabled(False)
+        self.ComparisonConfigCombo = QComboBox()
+        self.ComparisonConfigCombo.setEnabled(False)
+        self.ComparisonConfigCombo.addItems(["Default", "Creative", "Precise", "Fast", "Balanced"])
+        
+        # Add "Custom..." option
+        self.ComparisonConfigCombo.addItem("Custom...")
+        
+        self.ComparisonConfigLayout.addWidget(self.ComparisonConfigLabel)
+        self.ComparisonConfigLayout.addWidget(self.ComparisonConfigCombo, 1)
+        ConfigLayout.addRow(self.ComparisonConfigLayout)
+        
+        # Add repetition control
+        RepetitionLayout = QHBoxLayout()
+        self.RepetitionLabel = QLabel("Repetitions:")
+        self.RepetitionSpinner = QSpinBox()
+        self.RepetitionSpinner.setMinimum(1)
+        self.RepetitionSpinner.setMaximum(10)
+        self.RepetitionSpinner.setValue(3)
+        self.RepetitionSpinner.setToolTip("Number of times to run each prompt for more accurate benchmarking")
+        RepetitionLayout.addWidget(self.RepetitionLabel)
+        RepetitionLayout.addWidget(self.RepetitionSpinner)
+        RepetitionLayout.addStretch()
+        ConfigLayout.addRow(RepetitionLayout)
+        
+        # Add stress test options (hidden initially)
+        self.StressTestOptions = QGroupBox("Stress Test Options")
+        self.StressTestOptions.setVisible(False)
+        StressTestLayout = QFormLayout(self.StressTestOptions)
+        
+        # Add token count slider for stress test
+        self.TokenCountSpinner = QSpinBox()
+        self.TokenCountSpinner.setMinimum(100)
+        self.TokenCountSpinner.setMaximum(32000)
+        self.TokenCountSpinner.setValue(2048)
+        self.TokenCountSpinner.setSingleStep(100)
+        StressTestLayout.addRow("Target Token Count:", self.TokenCountSpinner)
+        
+        # Add stress test type
+        self.StressTestTypeCombo = QComboBox()
+        self.StressTestTypeCombo.addItems(["Long Context", "Rapid Requests", "Complex Reasoning"])
+        StressTestLayout.addRow("Test Type:", self.StressTestTypeCombo)
+        
+        # Add stress test to config layout
+        ConfigLayout.addRow(self.StressTestOptions)
+        
+        Layout.addWidget(ConfigFrame)
+        
+        # Add progress bar (hidden initially)
+        self.ProgressBar = QProgressBar()
+        self.ProgressBar.setVisible(False)
+        self.ProgressBar.setMinimum(0)
+        self.ProgressBar.setMaximum(100)
+        Layout.addWidget(self.ProgressBar)
+        
+        # Add prompt input
+        PromptLabel = QLabel("Enter benchmark prompts (one per line):")
+        Layout.addWidget(PromptLabel)
+        
+        self.PromptsText = QTextEdit()
+        self.PromptsText.setPlaceholderText("Enter benchmark prompts here...\n\nExample:\nSummarize the key features of neural networks.\nExplain the difference between supervised and unsupervised learning.\nWrite a short poem about artificial intelligence.")
+        self.PromptsText.setMinimumHeight(100)
+        Layout.addWidget(self.PromptsText)
+        
+        # Add buttons
+        ButtonLayout = QHBoxLayout()
+        
+        self.RunButton = QPushButton("Run Benchmark")
+        self.RunButton.setIcon(QIcon.fromTheme("media-playback-start"))
+        self.RunButton.clicked.connect(self._OnRunBenchmark)
+        ButtonLayout.addWidget(self.RunButton)
+        
+        self.StopButton = QPushButton("Stop")
+        self.StopButton.setIcon(QIcon.fromTheme("media-playback-stop"))
+        self.StopButton.clicked.connect(self._OnStopBenchmark)
+        self.StopButton.setEnabled(False)
+        ButtonLayout.addWidget(self.StopButton)
+        
+        self.SaveButton = QPushButton("Save Results")
+        self.SaveButton.setIcon(QIcon.fromTheme("document-save"))
+        self.SaveButton.clicked.connect(self._OnSaveResults)
+        self.SaveButton.setEnabled(False)
+        ButtonLayout.addWidget(self.SaveButton)
+        
+        Layout.addLayout(ButtonLayout)
+        
+        # Add results display with tabs
+        self.ResultsTabs = QTabWidget()
+        
+        # Summary tab
+        self.SummaryTab = QWidget()
+        SummaryLayout = QVBoxLayout(self.SummaryTab)
+        
+        self.SummaryText = QTextEdit()
+        self.SummaryText.setReadOnly(True)
+        SummaryLayout.addWidget(self.SummaryText)
+        
+        # Charts tab
+        self.ChartsTab = QWidget()
+        ChartsLayout = QVBoxLayout(self.ChartsTab)
+        
+        self.ChartPlaceholder = QLabel("Charts will appear here after running benchmarks")
+        self.ChartPlaceholder.setAlignment(Qt.AlignCenter)
+        ChartsLayout.addWidget(self.ChartPlaceholder)
+        
+        # Detailed results tab
+        self.DetailsTab = QWidget()
+        DetailsLayout = QVBoxLayout(self.DetailsTab)
+        
+        self.DetailsText = QTextEdit()
+        self.DetailsText.setReadOnly(True)
+        DetailsLayout.addWidget(self.DetailsText)
+        
+        # Add tabs to tab widget
+        self.ResultsTabs.addTab(self.SummaryTab, "Summary")
+        self.ResultsTabs.addTab(self.ChartsTab, "Charts")
+        self.ResultsTabs.addTab(self.DetailsTab, "Details")
+        
+        Layout.addWidget(self.ResultsTabs)
+        
+        # Initialize timer for progressive benchmark execution
+        self.BenchmarkTimer = QTimer()
+        self.BenchmarkTimer.timeout.connect(self._RunNextBenchmarkStep)
+    
+    def _OnBenchmarkTypeChanged(self, BenchmarkType):
+        """
+        Handle benchmark type change.
+        
+        Args:
+            BenchmarkType: Selected benchmark type
+        """
+        # Enable/disable controls based on benchmark type
+        if BenchmarkType == "Comparison":
+            self.CompareCheckbox.setChecked(True)
+            self.CompareCheckbox.setEnabled(False)
+            self.StressTestOptions.setVisible(False)
+        elif BenchmarkType == "Stress Test":
+            self.CompareCheckbox.setChecked(False)
+            self.CompareCheckbox.setEnabled(False)
+            self.StressTestOptions.setVisible(True)
+        else:  # Standard
+            self.CompareCheckbox.setEnabled(True)
+            self.StressTestOptions.setVisible(False)
+    
+    def _OnViewModelState(self):
+        """Handle view model state button click."""
+        # Get current model
+        CurrentModel = self.ModelManager.GetCurrentModel()
+        if not CurrentModel:
+            QMessageBox.warning(
+                self,
+                "No Model Selected",
+                "Please select a model first."
+            )
+            return
+        
+        ModelName = CurrentModel.get('name')
+        
+        # Show model state dialog
+        Dialog = ModelStateDialog(ModelName, self.StateManager, self)
+        Dialog.exec()
+    
+    def _OnCompareToggled(self, Checked):
+        """
+        Handle compare checkbox toggle.
+        
+        Args:
+            Checked: Whether the checkbox is checked
+        """
+        self.ComparisonConfigLabel.setEnabled(Checked)
+        self.ComparisonConfigCombo.setEnabled(Checked)
+    
+    def _OnRunBenchmark(self):
+        """Handle run benchmark button click."""
+        # Get prompts
+        PromptText = self.PromptsText.toPlainText()
+        Prompts = [p.strip() for p in PromptText.split('\n') if p.strip()]
+        
+        if not Prompts:
+            self.SummaryText.setText("Please enter at least one prompt.")
+            return
+        
+        # Get current model
+        CurrentModel = self.ModelManager.GetCurrentModel()
+        if not CurrentModel:
+            self.SummaryText.setText("Please select a model first.")
+            return
+        
+        ModelName = CurrentModel.get('name')
+        
+        # Get benchmark repetitions
+        Repetitions = self.RepetitionSpinner.value()
+        
+        # Get benchmark type
+        BenchmarkType = self.BenchmarkTypeCombo.currentText()
+        
+        # Prepare prompts based on benchmark type
+        if BenchmarkType == "Stress Test":
+            Prompts = self._PrepareStressTestPrompts(Prompts)
+        
+        # Check if comparing configurations
+        ComparisonConfig = None
+        ComparisonConfigName = None
+        
+        if BenchmarkType == "Comparison" or self.CompareCheckbox.isChecked():
+            ComparisonConfigName = self.ComparisonConfigCombo.currentText()
+            
+            # Get configuration parameters
+            if ComparisonConfigName == "Custom...":
+                # TODO: Implement custom configuration dialog
+                QMessageBox.information(
+                    self,
+                    "Not Implemented",
+                    "Custom comparison configuration is not yet implemented."
+                )
+                return
+            else:
+                # Use built-in preset
+                ComparisonConfig = self.ModelManager.GetPresetParameters(ComparisonConfigName)
+        
+        # Disable inputs and enable stop button
+        self._SetInputsEnabled(False)
+        self.RunButton.setEnabled(False)
+        self.StopButton.setEnabled(True)
+        self.IsRunning = True
+        
+        # Initialize progress bar
+        self.ProgressBar.setVisible(True)
+        self.ProgressBar.setValue(0)
+        
+        # Get current parameter state for reference
+        CurrentState = self.StateManager.CurrentStates.get(ModelName, {})
+        
+        # Initialize results dictionary
+        self.CurrentResults = {
+            "model": ModelName,
+            "parameters": CurrentState,
+            "benchmark_type": BenchmarkType,
+            "tests": [],
+            "model_state": {
+                "original": self.StateManager.OriginalStates.get(ModelName, {}),
+                "current": CurrentState
+            },
+            "comparison_config_name": ComparisonConfigName if ComparisonConfig else None,
+            "comparison_config": ComparisonConfig
+        }
+        
+        # Initialize benchmark progress trackers
+        self.Prompts = Prompts
+        self.Repetitions = Repetitions
+        self.ModelName = ModelName
+        self.BenchmarkType = BenchmarkType
+        self.ComparisonConfig = ComparisonConfig
+        self.ComparisonConfigName = ComparisonConfigName
+        
+        self.CurrentPromptIndex = 0
+        self.CurrentRunIndex = 0
+        self.TotalPrompts = len(Prompts)
+        self.TotalRuns = Repetitions
+        
+        self.PromptResults = []
+        self.ComparisonPromptResults = []
+        
+        # Update status
+        self.SummaryText.setText(f"Running benchmark for {ModelName}...\n")
+        self.SummaryText.append(f"Using the following parameters:\n")
+        for Param, Value in CurrentState.items():
+            self.SummaryText.append(f"  • {Param}: {Value}")
+        self.SummaryText.append("\n")
+        QApplication.processEvents()
+        
+        # Start benchmark timer to run steps progressively
+        self.BenchmarkTimer.start(100)  # 100ms between steps
+    
+    def _PrepareStressTestPrompts(self, Prompts):
+        """
+        Prepare prompts for stress testing.
+        
+        Args:
+            Prompts: User-provided prompts
+            
+        Returns:
+            Modified prompts suitable for stress testing
+        """
+        TestType = self.StressTestTypeCombo.currentText()
+        TokenCount = self.TokenCountSpinner.value()
+        
+        if TestType == "Long Context":
+            # Create long context by repeating prompts
+            EnhancedPrompts = []
+            for Prompt in Prompts:
+                # Repeat prompt to increase context length
+                Repeats = max(1, TokenCount // (len(Prompt.split()) * 2))
+                EnhancedPrompt = (Prompt + "\n\n") * Repeats
+                EnhancedPrompt += f"\n\nSummarize all the information above in a coherent way."
+                EnhancedPrompts.append(EnhancedPrompt)
+            return EnhancedPrompts
+            
+        elif TestType == "Complex Reasoning":
+            # Enhance prompts with reasoning requirements
+            EnhancedPrompts = []
+            for Prompt in Prompts:
+                EnhancedPrompt = f"""I need you to think through the following in a step-by-step manner:
+
+{Prompt}
+
+Please approach this by:
+1. Breaking down the problem
+2. Analyzing each component
+3. Considering multiple perspectives
+4. Drawing connections between ideas
+5. Reaching a comprehensive conclusion
+
+Provide detailed reasoning for each step."""
+                EnhancedPrompts.append(EnhancedPrompt)
+            return EnhancedPrompts
+            
+        elif TestType == "Rapid Requests":
+            # For rapid requests, just use the original prompts but run them in quick succession
+            return Prompts
+        
+        return Prompts
+    
+    def _RunNextBenchmarkStep(self):
+        """Run the next step in the benchmark process."""
+        if not self.IsRunning:
+            self.BenchmarkTimer.stop()
+            return
+        
+        # Calculate total progress
+        TotalSteps = self.TotalPrompts * self.TotalRuns
+        if self.ComparisonConfig:
+            TotalSteps *= 2  # Double for comparison benchmarks
+            
+        CurrentStep = (self.CurrentPromptIndex * self.TotalRuns + self.CurrentRunIndex)
+        if self.ComparisonConfig and self.CurrentPromptIndex >= self.TotalPrompts:
+            # In comparison phase
+            AdjustedPromptIndex = self.CurrentPromptIndex - self.TotalPrompts
+            CurrentStep = self.TotalPrompts * self.TotalRuns + (AdjustedPromptIndex * self.TotalRuns + self.CurrentRunIndex)
+        
+        ProgressPercent = int((CurrentStep / TotalSteps) * 100)
+        self.ProgressBar.setValue(ProgressPercent)
+        
+        # Check if we're done with all prompts
+        if (not self.ComparisonConfig and self.CurrentPromptIndex >= self.TotalPrompts) or \
+           (self.ComparisonConfig and self.CurrentPromptIndex >= self.TotalPrompts * 2):
+            self._FinishBenchmark()
+            return
+            
+        # Get the current prompt
+        PromptIndex = self.CurrentPromptIndex
+        if self.ComparisonConfig and PromptIndex >= self.TotalPrompts:
+            # In comparison phase - adjust index
+            PromptIndex = PromptIndex - self.TotalPrompts
+            
+        Prompt = self.Prompts[PromptIndex]
+        
+        # Determine if we're in the comparison phase
+        IsComparison = self.ComparisonConfig and self.CurrentPromptIndex >= self.TotalPrompts
+        
+        try:
+            # Generate completion
+            if IsComparison:
+                # Using comparison config
+                Response = self.ModelManager.GenerateCompletion(Prompt, self.ComparisonConfig)
+                ResultsList = self.ComparisonPromptResults
+            else:
+                # Using current config
+                Response = self.ModelManager.GenerateCompletion(Prompt)
+                ResultsList = self.PromptResults
+            
+            # Check for errors
+            if "error" in Response:
+                self.SummaryText.append(f"Error in run {self.CurrentRunIndex + 1} for prompt {PromptIndex + 1}: {Response['error']}")
+                QApplication.processEvents()
+            else:
+                # Extract metrics
+                GenerationTime = Response.get('generation_time', 0)
+                InputTokens = Response.get('prompt_eval_count', 0)
+                OutputTokens = Response.get('eval_count', 0)
+                
+                # Add to results for this prompt
+                if len(ResultsList) <= PromptIndex:
+                    # Initialize results for this prompt
+                    ResultsList.append({
+                        "times": [],
+                        "input_tokens": [],
+                        "output_tokens": [],
+                        "successful_runs": 0
+                    })
+                
+                ResultsList[PromptIndex]["times"].append(GenerationTime)
+                ResultsList[PromptIndex]["input_tokens"].append(InputTokens)
+                ResultsList[PromptIndex]["output_tokens"].append(OutputTokens)
+                ResultsList[PromptIndex]["successful_runs"] += 1
+                
+                # Update status
+                PhaseText = "comparison " if IsComparison else ""
+                self.SummaryText.append(f"Completed {PhaseText}run {self.CurrentRunIndex + 1} for prompt {PromptIndex + 1}")
+                QApplication.processEvents()
+        except Exception as Error:
+            self.SummaryText.append(f"Error in run {self.CurrentRunIndex + 1} for prompt {PromptIndex + 1}: {Error}")
+            QApplication.processEvents()
+        
+        # Move to next run
+        self.CurrentRunIndex += 1
+        
+        # Check if we're done with all runs for current prompt
+        if self.CurrentRunIndex >= self.TotalRuns:
+            self.CurrentRunIndex = 0
+            self.CurrentPromptIndex += 1
+            
+            # If moving to comparison phase, update status
+            if self.ComparisonConfig and self.CurrentPromptIndex == self.TotalPrompts:
+                self.SummaryText.append(f"\nRunning comparison benchmark with {self.ComparisonConfigName} configuration...\n")
+                self.SummaryText.append(f"Using the following parameters:\n")
+                for Param, Value in self.ComparisonConfig.items():
+                    self.SummaryText.append(f"  • {Param}: {Value}")
+                self.SummaryText.append("\n")
+                QApplication.processEvents()
+    
+    def _FinishBenchmark(self):
+        """Finish benchmark and display results."""
+        # Stop the timer
+        self.BenchmarkTimer.stop()
+        
+        # Enable inputs and disable stop button
+        self._SetInputsEnabled(True)
+        self.RunButton.setEnabled(True)
+        self.StopButton.setEnabled(False)
+        self.IsRunning = False
+        
+        # Hide progress bar
+        self.ProgressBar.setVisible(False)
+        
+        # Calculate summary statistics for primary benchmark
+        Tests = []
+        TotalTokens = 0
+        TotalTime = 0
+        TotalOutputTokens = 0
+        SuccessfulPrompts = 0
+        
+        for PromptIndex, PromptResult in enumerate(self.PromptResults):
+            if PromptResult["successful_runs"] > 0:
+                # Calculate averages
+                AvgTime = sum(PromptResult["times"]) / PromptResult["successful_runs"]
+                AvgInputTokens = sum(PromptResult["input_tokens"]) / PromptResult["successful_runs"]
+                AvgOutputTokens = sum(PromptResult["output_tokens"]) / PromptResult["successful_runs"]
+                TokensPerSecond = AvgOutputTokens / AvgTime if AvgTime > 0 else 0
+                
+                # Add to totals
+                TotalTokens += AvgInputTokens + AvgOutputTokens
+                TotalOutputTokens += AvgOutputTokens
+                TotalTime += AvgTime
+                SuccessfulPrompts += 1
+                
+                # Add test result
+                Tests.append({
+                    "id": PromptIndex,
+                    "prompt": self.Prompts[PromptIndex],
+                    "average_time": AvgTime,
+                    "average_input_tokens": AvgInputTokens,
+                    "average_output_tokens": AvgOutputTokens,
+                    "tokens_per_second": TokensPerSecond,
+                    "successful_runs": PromptResult["successful_runs"]
+                })
+        
+        # Add tests to results
+        self.CurrentResults["tests"] = Tests
+        
+        # Calculate summary statistics
+        if SuccessfulPrompts > 0:
+            self.CurrentResults["summary"] = {
+                "total_tests": SuccessfulPrompts,
+                "total_tokens": TotalTokens,
+                "total_time": TotalTime,
+                "average_tokens_per_second": TotalOutputTokens / TotalTime if TotalTime > 0 else 0,
+                "average_time_per_test": TotalTime / SuccessfulPrompts,
+                "benchmark_date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+        
+        # Calculate summary statistics for comparison benchmark if available
+        if self.ComparisonConfig:
+            ComparisonTests = []
+            CompTotalTokens = 0
+            CompTotalTime = 0
+            CompTotalOutputTokens = 0
+            CompSuccessfulPrompts = 0
+            
+            for PromptIndex, PromptResult in enumerate(self.ComparisonPromptResults):
+                if PromptResult["successful_runs"] > 0:
+                    # Calculate averages
+                    AvgTime = sum(PromptResult["times"]) / PromptResult["successful_runs"]
+                    AvgInputTokens = sum(PromptResult["input_tokens"]) / PromptResult["successful_runs"]
+                    AvgOutputTokens = sum(PromptResult["output_tokens"]) / PromptResult["successful_runs"]
+                    TokensPerSecond = AvgOutputTokens / AvgTime if AvgTime > 0 else 0
+                    
+                    # Add to totals
+                    CompTotalTokens += AvgInputTokens + AvgOutputTokens
+                    CompTotalOutputTokens += AvgOutputTokens
+                    CompTotalTime += AvgTime
+                    CompSuccessfulPrompts += 1
+                    
+                    # Add test result
+                    ComparisonTests.append({
+                        "id": PromptIndex,
+                        "prompt": self.Prompts[PromptIndex],
+                        "average_time": AvgTime,
+                        "average_input_tokens": AvgInputTokens,
+                        "average_output_tokens": AvgOutputTokens,
+                        "tokens_per_second": TokensPerSecond,
+                        "successful_runs": PromptResult["successful_runs"]
+                    })
+            
+            # Add comparison tests to results
+            self.CurrentResults["comparison_tests"] = ComparisonTests
+            
+            # Calculate comparison summary statistics
+            if CompSuccessfulPrompts > 0:
+                self.CurrentResults["comparison_summary"] = {
+                    "total_tests": CompSuccessfulPrompts,
+                    "total_tokens": CompTotalTokens,
+                    "total_time": CompTotalTime,
+                    "average_tokens_per_second": CompTotalOutputTokens / CompTotalTime if CompTotalTime > 0 else 0,
+                    "average_time_per_test": CompTotalTime / CompSuccessfulPrompts
+                }
+        
+        # Display summary results
+        self._DisplayBenchmarkSummary(self.CurrentResults)
+        
+        # Create charts
+        self._CreateBenchmarkCharts(self.CurrentResults)
+        
+        # Display detailed results
+        self._DisplayBenchmarkDetails(self.CurrentResults)
+        
+        # Enable save button
+        self.SaveButton.setEnabled(True)
+        
+        # Show message
+        self.SummaryText.append("\nBenchmark complete!")
+    
+    def _SetInputsEnabled(self, Enabled):
+        """
+        Enable or disable input controls.
+        
+        Args:
+            Enabled: Whether inputs should be enabled
+        """
+        self.ViewStateButton.setEnabled(Enabled)
+        self.BenchmarkTypeCombo.setEnabled(Enabled)
+        self.CompareCheckbox.setEnabled(Enabled)
+        self.ComparisonConfigCombo.setEnabled(Enabled and self.CompareCheckbox.isChecked())
+        self.RepetitionSpinner.setEnabled(Enabled)
+        self.PromptsText.setEnabled(Enabled)
+        self.StressTestOptions.setEnabled(Enabled)
+        self.TokenCountSpinner.setEnabled(Enabled)
+        self.StressTestTypeCombo.setEnabled(Enabled)
+    
+    def _OnStopBenchmark(self):
+        """Handle stop benchmark button click."""
+        # Set flag to stop benchmark
+        self.IsRunning = False
+        
+        # Stop the timer
+        self.BenchmarkTimer.stop()
+        
+        # Enable inputs and disable stop button
+        self._SetInputsEnabled(True)
+        self.RunButton.setEnabled(True)
+        self.StopButton.setEnabled(False)
+        
+        # Hide progress bar
+        self.ProgressBar.setVisible(False)
+        
+        # Update status
+        self.SummaryText.append("\nBenchmark stopped by user.")
+    
+    def _DisplayBenchmarkSummary(self, Results):
+        """
+        Display benchmark summary.
+        
+        Args:
+            Results: Benchmark results
+        """
+        Summary = Results.get('summary', {})
+        Model = Results.get('model', 'Unknown')
+        Parameters = Results.get('parameters', {})
+        ModelState = Results.get('model_state', {})
+        BenchmarkType = Results.get('benchmark_type', 'Standard')
+        
+        SummaryText = f"<h2>Benchmark Results for {Model}</h2>\n"
+        
+        # Add benchmark type
+        SummaryText += f"<p><b>Benchmark Type:</b> {BenchmarkType}</p>\n"
+        
+        # Add model state information
+        SummaryText += "<h3>Model Parameters</h3>\n"
+        
+        # Create table for parameters with highlighting for changed values
+        SummaryText += "<table border='1' cellpadding='4' cellspacing='0' style='border-collapse: collapse;'>\n"
+        SummaryText += "<tr><th>Parameter</th><th>Original Value</th><th>Benchmark Value</th></tr>\n"
+        
+        # Get parameter differences
+        OriginalState = ModelState.get('original', {})
+        CurrentState = ModelState.get('current', {})
+        
+        # Show all parameters used in the benchmark
+        for Param, Value in Parameters.items():
+            OrigValue = OriginalState.get(Param, Value)
+            
+            # Check if value is different from original
+            IsDifferent = OrigValue != Value
+            
+            # Create row with highlighting if different
+            if IsDifferent:
+                SummaryText += f"<tr><td>{Param}</td><td>{OrigValue}</td><td style='background-color: #FFFF99;'>{Value}</td></tr>\n"
+            else:
+                SummaryText += f"<tr><td>{Param}</td><td>{OrigValue}</td><td>{Value}</td></tr>\n"
+        
+        SummaryText += "</table>\n"
+        
+        # Add summary statistics
+        SummaryText += "<h3>Summary Statistics</h3>\n<ul>"
+        SummaryText += f"<li><b>Total Tests:</b> {Summary.get('total_tests', 0)}</li>"
+        SummaryText += f"<li><b>Total Tokens:</b> {Summary.get('total_tokens', 0)}</li>"
+        SummaryText += f"<li><b>Total Time:</b> {Summary.get('total_time', 0):.2f} seconds</li>"
+        SummaryText += f"<li><b>Average Tokens/Second:</b> {Summary.get('average_tokens_per_second', 0):.2f}</li>"
+        SummaryText += f"<li><b>Average Time/Test:</b> {Summary.get('average_time_per_test', 0):.2f} seconds</li>"
+        SummaryText += f"<li><b>Benchmark Date:</b> {Summary.get('benchmark_date', 'Unknown')}</li>"
+        SummaryText
