@@ -2,7 +2,7 @@
 # Path: OllamaModelEditor/Core/ModelManager.py
 # Standard: AIDEV-PascalCase-1.2
 # Created: 2025-03-11
-# Last Modified: 2025-03-12 06:00PM
+# Last Modified: 2025-03-12 11:30PM
 # Description: Manages Ollama model operations for the OllamaModelEditor application
 
 import os
@@ -134,16 +134,17 @@ class ModelManager:
             
             # Update last used timestamp in database if available
             if self.DB:
-                # Update last_used timestamp
+                # Update LastUsed timestamp
                 self.DB.ExecuteNonQuery(
                     """
                     UPDATE ModelConfigs 
-                    SET last_used = CURRENT_TIMESTAMP 
-                    WHERE model_name = ?
+                    SET LastUsed = CURRENT_TIMESTAMP 
+                    WHERE ModelName = ?
                     """,
                     (ModelName,)
                 )
             
+            self.Logger.info(f"Current model set to: {ModelName}")
             return True
                 
         except Exception as Error:
@@ -273,6 +274,7 @@ class ModelManager:
             if self.DB:
                 self.DB.SaveModelConfig(ModelName, "Default", CurrentParams)
             
+            self.Logger.info(f"Model parameters updated for {ModelName}")
             return True
                 
         except Exception as Error:
@@ -479,6 +481,7 @@ class ModelManager:
             with open(FilePath, 'w') as ExportFile:
                 json.dump(ExportData, ExportFile, indent=2)
             
+            self.Logger.info(f"Model definition exported to {FilePath}")
             return True
                 
         except Exception as Error:
@@ -536,11 +539,11 @@ class ModelManager:
                 Preset = self.DB.GetPreset(PresetName)
                 if Preset:
                     PresetParams = {
-                        'Temperature': Preset['temperature'],
-                        'TopP': Preset['top_p'],
-                        'MaxTokens': Preset['max_tokens'],
-                        'FrequencyPenalty': Preset['frequency_penalty'],
-                        'PresencePenalty': Preset['presence_penalty']
+                        'Temperature': Preset['Temperature'],
+                        'TopP': Preset['TopP'],
+                        'MaxTokens': Preset['MaxTokens'],
+                        'FrequencyPenalty': Preset['FrequencyPenalty'],
+                        'PresencePenalty': Preset['PresencePenalty']
                     }
                     
                     # Update preset usage statistics
@@ -614,6 +617,7 @@ class ModelManager:
             # Save to database if available
             if self.DB:
                 self.DB.SaveUserPreset(PresetName, Description, Parameters)
+                self.Logger.info(f"User preset '{PresetName}' saved")
                 return True
             
             # No database, cannot save user preset
@@ -636,14 +640,14 @@ class ModelManager:
             
             # Convert database format to application format
             return [{
-                'Name': Preset['name'],
-                'Description': Preset['description'],
+                'Name': Preset['Name'],
+                'Description': Preset['Description'],
                 'Parameters': {
-                    'Temperature': Preset['temperature'],
-                    'TopP': Preset['top_p'],
-                    'MaxTokens': Preset['max_tokens'],
-                    'FrequencyPenalty': Preset['frequency_penalty'],
-                    'PresencePenalty': Preset['presence_penalty']
+                    'Temperature': Preset['Temperature'],
+                    'TopP': Preset['TopP'],
+                    'MaxTokens': Preset['MaxTokens'],
+                    'FrequencyPenalty': Preset['FrequencyPenalty'],
+                    'PresencePenalty': Preset['PresencePenalty']
                 }
             } for Preset in UserPresets]
         
@@ -660,8 +664,11 @@ class ModelManager:
             bool: True if successful, False otherwise
         """
         if self.DB:
-            return self.DB.DeleteUserPreset(PresetName)
+            Result = self.DB.DeleteUserPreset(PresetName)
+            if Result:
+                self.Logger.info(f"User preset '{PresetName}' deleted")
+            else:
+                self.Logger.warning(f"Failed to delete user preset '{PresetName}'")
+            return Result
         
         return False
-
-                

@@ -2,7 +2,7 @@
 # Path: OllamaModelEditor/Core/DBManager.py
 # Standard: AIDEV-PascalCase-1.2
 # Created: 2025-03-12
-# Last Modified: 2025-03-12 04:30PM
+# Last Modified: 2025-03-12 08:30PM
 # Description: Database management for the OllamaModelEditor application
 
 import os
@@ -51,12 +51,12 @@ class DBManager:
         if os.name == 'nt':  # Windows
             ConfigDir = HomeDir / 'AppData' / 'Local' / 'OllamaModelEditor'
         else:  # macOS and Linux
-            ConfigDir = HomeDir / '.config' / 'ollamaModelEditor'
+            ConfigDir = HomeDir / '.config' / 'OllamaModelEditor'
         
         # Create directory if it doesn't exist
         ConfigDir.mkdir(parents=True, exist_ok=True)
         
-        return str(ConfigDir / 'ollamaModelEditor.db')
+        return str(ConfigDir / 'OllamaModelEditor.db')
     
     def _InitializeDB(self) -> None:
         """Initialize the database with required tables and default data."""
@@ -65,132 +65,132 @@ class DBManager:
             Schema = """
             -- Database version
             CREATE TABLE IF NOT EXISTS DBVersion (
-                version INTEGER PRIMARY KEY,
-                applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                Version INTEGER PRIMARY KEY,
+                AppliedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             
             -- Model configurations
             CREATE TABLE IF NOT EXISTS ModelConfigs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                model_name TEXT NOT NULL,
-                config_name TEXT NOT NULL,
-                temperature REAL DEFAULT 0.7,
-                top_p REAL DEFAULT 0.9,
-                max_tokens INTEGER DEFAULT 2048,
-                frequency_penalty REAL DEFAULT 0.0,
-                presence_penalty REAL DEFAULT 0.0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_used TIMESTAMP,
-                is_default BOOLEAN DEFAULT 0,
-                UNIQUE(model_name, config_name)
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                ModelName TEXT NOT NULL,
+                ConfigName TEXT NOT NULL,
+                Temperature REAL DEFAULT 0.7,
+                TopP REAL DEFAULT 0.9,
+                MaxTokens INTEGER DEFAULT 2048,
+                FrequencyPenalty REAL DEFAULT 0.0,
+                PresencePenalty REAL DEFAULT 0.0,
+                CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                LastUsed TIMESTAMP,
+                IsDefault BOOLEAN DEFAULT 0,
+                UNIQUE(ModelName, ConfigName)
             );
 
             -- Preset configurations
             CREATE TABLE IF NOT EXISTS Presets (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE NOT NULL,
-                description TEXT,
-                temperature REAL DEFAULT 0.7,
-                top_p REAL DEFAULT 0.9,
-                max_tokens INTEGER DEFAULT 2048,
-                frequency_penalty REAL DEFAULT 0.0,
-                presence_penalty REAL DEFAULT 0.0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_used TIMESTAMP
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                Name TEXT UNIQUE NOT NULL,
+                Description TEXT,
+                Temperature REAL DEFAULT 0.7,
+                TopP REAL DEFAULT 0.9,
+                MaxTokens INTEGER DEFAULT 2048,
+                FrequencyPenalty REAL DEFAULT 0.0,
+                PresencePenalty REAL DEFAULT 0.0,
+                CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                LastUsed TIMESTAMP
             );
             
             -- User-defined presets
             CREATE TABLE IF NOT EXISTS UserPresets (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE NOT NULL,
-                description TEXT,
-                temperature REAL DEFAULT 0.7,
-                top_p REAL DEFAULT 0.9,
-                max_tokens INTEGER DEFAULT 2048,
-                frequency_penalty REAL DEFAULT 0.0,
-                presence_penalty REAL DEFAULT 0.0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_used TIMESTAMP
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                Name TEXT UNIQUE NOT NULL,
+                Description TEXT,
+                Temperature REAL DEFAULT 0.7,
+                TopP REAL DEFAULT 0.9,
+                MaxTokens INTEGER DEFAULT 2048,
+                FrequencyPenalty REAL DEFAULT 0.0,
+                PresencePenalty REAL DEFAULT 0.0,
+                CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                LastUsed TIMESTAMP
             );
             
             -- User preferences
             CREATE TABLE IF NOT EXISTS UserPreferences (
-                key TEXT PRIMARY KEY,
-                value TEXT,
-                value_type TEXT,  -- For type conversion: "string", "int", "float", "bool", "json"
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                Key TEXT PRIMARY KEY,
+                Value TEXT,
+                ValueType TEXT,
+                UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             
             -- Application settings
             CREATE TABLE IF NOT EXISTS AppSettings (
-                key TEXT PRIMARY KEY,
-                value TEXT,
-                value_type TEXT,  -- For type conversion
-                description TEXT,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                Key TEXT PRIMARY KEY,
+                Value TEXT,
+                ValueType TEXT,
+                Description TEXT,
+                UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             
             -- Parameter definitions and descriptions
             CREATE TABLE IF NOT EXISTS Parameters (
-                name TEXT PRIMARY KEY,
-                display_name TEXT NOT NULL,
-                description TEXT,
-                min_value REAL,
-                max_value REAL,
-                default_value REAL,
-                step_size REAL,
-                is_integer BOOLEAN DEFAULT 0,
-                category TEXT,  -- e.g., "basic", "advanced"
-                order_index INTEGER  -- For display ordering
+                Name TEXT PRIMARY KEY,
+                DisplayName TEXT NOT NULL,
+                Description TEXT,
+                MinValue REAL,
+                MaxValue REAL,
+                DefaultValue REAL,
+                StepSize REAL,
+                IsInteger BOOLEAN DEFAULT 0,
+                Category TEXT,
+                OrderIndex INTEGER
             );
             
             -- Generation history
             CREATE TABLE IF NOT EXISTS GenerationHistory (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                model_name TEXT NOT NULL,
-                prompt TEXT NOT NULL,
-                response TEXT,
-                temperature REAL,
-                top_p REAL,
-                max_tokens INTEGER,
-                frequency_penalty REAL,
-                presence_penalty REAL,
-                input_tokens INTEGER,
-                output_tokens INTEGER,
-                total_tokens INTEGER,
-                generation_time REAL,  -- in seconds
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                ModelName TEXT NOT NULL,
+                Prompt TEXT NOT NULL,
+                Response TEXT,
+                Temperature REAL,
+                TopP REAL,
+                MaxTokens INTEGER,
+                FrequencyPenalty REAL,
+                PresencePenalty REAL,
+                InputTokens INTEGER,
+                OutputTokens INTEGER,
+                TotalTokens INTEGER,
+                GenerationTime REAL,
+                CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             
             -- Benchmark results
             CREATE TABLE IF NOT EXISTS BenchmarkResults (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                benchmark_name TEXT,
-                model_name TEXT NOT NULL,
-                config_id INTEGER,
-                prompt TEXT,
-                average_time REAL,  -- Average generation time in seconds
-                average_tokens INTEGER,
-                average_tokens_per_second REAL,
-                runs INTEGER,  -- Number of benchmark runs
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(config_id) REFERENCES ModelConfigs(id)
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                BenchmarkName TEXT,
+                ModelName TEXT NOT NULL,
+                ConfigID INTEGER,
+                Prompt TEXT,
+                AverageTime REAL,
+                AverageTokens INTEGER,
+                AverageTokensPerSecond REAL,
+                Runs INTEGER,
+                CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(ConfigID) REFERENCES ModelConfigs(ID)
             );
             
             -- Messages for UI elements
             CREATE TABLE IF NOT EXISTS UIMessages (
-                key TEXT PRIMARY KEY,
-                message TEXT NOT NULL,
-                context TEXT,  -- e.g., "error", "info", "tooltip"
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                Key TEXT PRIMARY KEY,
+                Message TEXT NOT NULL,
+                Context TEXT,
+                UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             
             -- UI strings for internationalization
             CREATE TABLE IF NOT EXISTS UIStrings (
-                key TEXT PRIMARY KEY,
-                en_text TEXT NOT NULL,  -- English text
-                description TEXT,
-                context TEXT   -- Where this string is used
+                Key TEXT PRIMARY KEY,
+                EnText TEXT NOT NULL,
+                Description TEXT,
+                Context TEXT
             );
             """
             
@@ -204,7 +204,7 @@ class DBManager:
                 # Check current database version
                 Cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='DBVersion'")
                 if Cursor.fetchone()[0] > 0:
-                    Cursor.execute("SELECT MAX(version) FROM DBVersion")
+                    Cursor.execute("SELECT MAX(Version) FROM DBVersion")
                     Result = Cursor.fetchone()
                     CurrentVersion = Result[0] if Result[0] is not None else 0
                 else:
@@ -212,7 +212,7 @@ class DBManager:
                 
                 # Set initial version if it doesn't exist
                 if CurrentVersion == 0:
-                    Cursor.execute("INSERT INTO DBVersion (version) VALUES (1)")
+                    Cursor.execute("INSERT INTO DBVersion (Version) VALUES (1)")
                     CurrentVersion = 1
                 
                 # Check if presets need to be initialized
@@ -286,8 +286,8 @@ class DBManager:
         
         Cursor.executemany(
             """
-            INSERT INTO Presets (name, description, temperature, top_p, max_tokens, 
-                               frequency_penalty, presence_penalty)
+            INSERT INTO Presets (Name, Description, Temperature, TopP, MaxTokens, 
+                               FrequencyPenalty, PresencePenalty)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """, 
             Presets
@@ -330,8 +330,8 @@ class DBManager:
         
         Cursor.executemany(
             """
-            INSERT INTO Parameters (name, display_name, description, min_value, max_value, 
-                                 default_value, step_size, is_integer, category, order_index)
+            INSERT INTO Parameters (Name, DisplayName, Description, MinValue, MaxValue, 
+                                 DefaultValue, StepSize, IsInteger, Category, OrderIndex)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, 
             Parameters
@@ -376,7 +376,7 @@ class DBManager:
         
         Cursor.executemany(
             """
-            INSERT INTO UIStrings (key, en_text, description, context)
+            INSERT INTO UIStrings (Key, EnText, Description, Context)
             VALUES (?, ?, ?, ?)
             """, 
             UIStrings
@@ -447,14 +447,14 @@ class DBManager:
             List of configuration dictionaries
         """
         Results = self.ExecuteQuery(
-            "SELECT * FROM ModelConfigs WHERE model_name = ?",
+            "SELECT * FROM ModelConfigs WHERE ModelName = ?",
             (ModelName,)
         )
         
         Columns = [
-            "id", "model_name", "config_name", "temperature", "top_p", 
-            "max_tokens", "frequency_penalty", "presence_penalty", 
-            "created_at", "last_used", "is_default"
+            "ID", "ModelName", "ConfigName", "Temperature", "TopP", 
+            "MaxTokens", "FrequencyPenalty", "PresencePenalty", 
+            "CreatedAt", "LastUsed", "IsDefault"
         ]
         
         return [dict(zip(Columns, Row)) for Row in Results]
@@ -471,7 +471,7 @@ class DBManager:
             Configuration dictionary or None if not found
         """
         Results = self.ExecuteQuery(
-            "SELECT * FROM ModelConfigs WHERE model_name = ? AND config_name = ?",
+            "SELECT * FROM ModelConfigs WHERE ModelName = ? AND ConfigName = ?",
             (ModelName, ConfigName)
         )
         
@@ -479,9 +479,9 @@ class DBManager:
             return None
         
         Columns = [
-            "id", "model_name", "config_name", "temperature", "top_p", 
-            "max_tokens", "frequency_penalty", "presence_penalty", 
-            "created_at", "last_used", "is_default"
+            "ID", "ModelName", "ConfigName", "Temperature", "TopP", 
+            "MaxTokens", "FrequencyPenalty", "PresencePenalty", 
+            "CreatedAt", "LastUsed", "IsDefault"
         ]
         
         return dict(zip(Columns, Results[0]))
@@ -505,10 +505,10 @@ class DBManager:
             # Update existing configuration
             Query = """
             UPDATE ModelConfigs
-            SET temperature = ?, top_p = ?, max_tokens = ?, 
-                frequency_penalty = ?, presence_penalty = ?,
-                last_used = CURRENT_TIMESTAMP
-            WHERE model_name = ? AND config_name = ?
+            SET Temperature = ?, TopP = ?, MaxTokens = ?, 
+                FrequencyPenalty = ?, PresencePenalty = ?,
+                LastUsed = CURRENT_TIMESTAMP
+            WHERE ModelName = ? AND ConfigName = ?
             """
             
             self.ExecuteNonQuery(
@@ -524,13 +524,13 @@ class DBManager:
                 )
             )
             
-            return ExistingConfig["id"]
+            return ExistingConfig["ID"]
         else:
             # Insert new configuration
             Query = """
             INSERT INTO ModelConfigs
-            (model_name, config_name, temperature, top_p, max_tokens, 
-             frequency_penalty, presence_penalty)
+            (ModelName, ConfigName, Temperature, TopP, MaxTokens, 
+             FrequencyPenalty, PresencePenalty)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """
             
@@ -559,7 +559,7 @@ class DBManager:
             True if deleted, False if not found
         """
         Result = self.ExecuteNonQuery(
-            "DELETE FROM ModelConfigs WHERE model_name = ? AND config_name = ?",
+            "DELETE FROM ModelConfigs WHERE ModelName = ? AND ConfigName = ?",
             (ModelName, ConfigName)
         )
         
@@ -574,12 +574,12 @@ class DBManager:
         Returns:
             List of preset dictionaries
         """
-        Results = self.ExecuteQuery("SELECT * FROM Presets ORDER BY name")
+        Results = self.ExecuteQuery("SELECT * FROM Presets ORDER BY Name")
         
         Columns = [
-            "id", "name", "description", "temperature", "top_p", 
-            "max_tokens", "frequency_penalty", "presence_penalty", 
-            "created_at", "last_used"
+            "ID", "Name", "Description", "Temperature", "TopP", 
+            "MaxTokens", "FrequencyPenalty", "PresencePenalty", 
+            "CreatedAt", "LastUsed"
         ]
         
         return [dict(zip(Columns, Row)) for Row in Results]
@@ -595,7 +595,7 @@ class DBManager:
             Preset dictionary or None if not found
         """
         Results = self.ExecuteQuery(
-            "SELECT * FROM Presets WHERE name = ?",
+            "SELECT * FROM Presets WHERE Name = ?",
             (PresetName,)
         )
         
@@ -603,16 +603,16 @@ class DBManager:
             return None
         
         Columns = [
-            "id", "name", "description", "temperature", "top_p", 
-            "max_tokens", "frequency_penalty", "presence_penalty", 
-            "created_at", "last_used"
+            "ID", "Name", "Description", "Temperature", "TopP", 
+            "MaxTokens", "FrequencyPenalty", "PresencePenalty", 
+            "CreatedAt", "LastUsed"
         ]
         
         return dict(zip(Columns, Results[0]))
     
     def UpdatePresetUsage(self, PresetName: str) -> bool:
         """
-        Update the last_used timestamp for a preset.
+        Update the LastUsed timestamp for a preset.
         
         Args:
             PresetName: Name of the preset
@@ -621,7 +621,7 @@ class DBManager:
             True if updated, False if not found
         """
         Result = self.ExecuteNonQuery(
-            "UPDATE Presets SET last_used = CURRENT_TIMESTAMP WHERE name = ?",
+            "UPDATE Presets SET LastUsed = CURRENT_TIMESTAMP WHERE Name = ?",
             (PresetName,)
         )
         
@@ -636,12 +636,12 @@ class DBManager:
         Returns:
             List of user preset dictionaries
         """
-        Results = self.ExecuteQuery("SELECT * FROM UserPresets ORDER BY name")
+        Results = self.ExecuteQuery("SELECT * FROM UserPresets ORDER BY Name")
         
         Columns = [
-            "id", "name", "description", "temperature", "top_p", 
-            "max_tokens", "frequency_penalty", "presence_penalty", 
-            "created_at", "last_used"
+            "ID", "Name", "Description", "Temperature", "TopP", 
+            "MaxTokens", "FrequencyPenalty", "PresencePenalty", 
+            "CreatedAt", "LastUsed"
         ]
         
         return [dict(zip(Columns, Row)) for Row in Results]
@@ -660,7 +660,7 @@ class DBManager:
         """
         # Check if preset exists
         ExistingPreset = self.ExecuteQuery(
-            "SELECT id FROM UserPresets WHERE name = ?",
+            "SELECT ID FROM UserPresets WHERE Name = ?",
             (PresetName,)
         )
         
@@ -668,10 +668,10 @@ class DBManager:
             # Update existing preset
             Query = """
             UPDATE UserPresets
-            SET description = ?, temperature = ?, top_p = ?, max_tokens = ?, 
-                frequency_penalty = ?, presence_penalty = ?,
-                last_used = CURRENT_TIMESTAMP
-            WHERE name = ?
+            SET Description = ?, Temperature = ?, TopP = ?, MaxTokens = ?, 
+                FrequencyPenalty = ?, PresencePenalty = ?,
+                LastUsed = CURRENT_TIMESTAMP
+            WHERE Name = ?
             """
             
             self.ExecuteNonQuery(
@@ -692,8 +692,8 @@ class DBManager:
             # Insert new preset
             Query = """
             INSERT INTO UserPresets
-            (name, description, temperature, top_p, max_tokens, 
-             frequency_penalty, presence_penalty)
+            (Name, Description, Temperature, TopP, MaxTokens, 
+             FrequencyPenalty, PresencePenalty)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """
             
@@ -721,7 +721,7 @@ class DBManager:
             True if deleted, False if not found
         """
         Result = self.ExecuteNonQuery(
-            "DELETE FROM UserPresets WHERE name = ?",
+            "DELETE FROM UserPresets WHERE Name = ?",
             (PresetName,)
         )
         
@@ -741,7 +741,7 @@ class DBManager:
             Preference value
         """
         Results = self.ExecuteQuery(
-            "SELECT value, value_type FROM UserPreferences WHERE key = ?",
+            "SELECT Value, ValueType FROM UserPreferences WHERE Key = ?",
             (Key,)
         )
         
@@ -789,7 +789,7 @@ class DBManager:
         
         # Check if preference exists
         Results = self.ExecuteQuery(
-            "SELECT COUNT(*) FROM UserPreferences WHERE key = ?",
+            "SELECT COUNT(*) FROM UserPreferences WHERE Key = ?",
             (Key,)
         )
         
@@ -798,8 +798,8 @@ class DBManager:
             self.ExecuteNonQuery(
                 """
                 UPDATE UserPreferences
-                SET value = ?, value_type = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE key = ?
+                SET Value = ?, ValueType = ?, UpdatedAt = CURRENT_TIMESTAMP
+                WHERE Key = ?
                 """,
                 (ValueStr, ValueType, Key)
             )
@@ -807,7 +807,7 @@ class DBManager:
             # Insert new preference
             self.ExecuteNonQuery(
                 """
-                INSERT INTO UserPreferences (key, value, value_type)
+                INSERT INTO UserPreferences (Key, Value, ValueType)
                 VALUES (?, ?, ?)
                 """,
                 (Key, ValueStr, ValueType)
@@ -827,7 +827,7 @@ class DBManager:
             Setting value
         """
         Results = self.ExecuteQuery(
-            "SELECT value, value_type FROM AppSettings WHERE key = ?",
+            "SELECT Value, ValueType FROM AppSettings WHERE Key = ?",
             (Key,)
         )
         
@@ -876,7 +876,7 @@ class DBManager:
         
         # Check if setting exists
         Results = self.ExecuteQuery(
-            "SELECT COUNT(*) FROM AppSettings WHERE key = ?",
+            "SELECT COUNT(*) FROM AppSettings WHERE Key = ?",
             (Key,)
         )
         
@@ -886,8 +886,8 @@ class DBManager:
                 self.ExecuteNonQuery(
                     """
                     UPDATE AppSettings
-                    SET value = ?, value_type = ?, description = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE key = ?
+                    SET Value = ?, ValueType = ?, Description = ?, UpdatedAt = CURRENT_TIMESTAMP
+                    WHERE Key = ?
                     """,
                     (ValueStr, ValueType, Description, Key)
                 )
@@ -895,8 +895,8 @@ class DBManager:
                 self.ExecuteNonQuery(
                     """
                     UPDATE AppSettings
-                    SET value = ?, value_type = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE key = ?
+                    SET Value = ?, ValueType = ?, UpdatedAt = CURRENT_TIMESTAMP
+                    WHERE Key = ?
                     """,
                     (ValueStr, ValueType, Key)
                 )
@@ -904,7 +904,7 @@ class DBManager:
             # Insert new setting
             self.ExecuteNonQuery(
                 """
-                INSERT INTO AppSettings (key, value, value_type, description)
+                INSERT INTO AppSettings (Key, Value, ValueType, Description)
                 VALUES (?, ?, ?, ?)
                 """,
                 (Key, ValueStr, ValueType, Description)
@@ -924,7 +924,7 @@ class DBManager:
             UI string
         """
         Results = self.ExecuteQuery(
-            "SELECT en_text FROM UIStrings WHERE key = ?",
+            "SELECT EnText FROM UIStrings WHERE Key = ?",
             (Key,)
         )
         
@@ -945,12 +945,12 @@ class DBManager:
         """
         if Context:
             Results = self.ExecuteQuery(
-                "SELECT key, en_text FROM UIStrings WHERE context = ?",
+                "SELECT Key, EnText FROM UIStrings WHERE Context = ?",
                 (Context,)
             )
         else:
             Results = self.ExecuteQuery(
-                "SELECT key, en_text FROM UIStrings"
+                "SELECT Key, EnText FROM UIStrings"
             )
         
         return {Key: Text for Key, Text in Results}
@@ -967,7 +967,7 @@ class DBManager:
         """
         # Check if string exists
         Results = self.ExecuteQuery(
-            "SELECT COUNT(*) FROM UIStrings WHERE key = ?",
+            "SELECT COUNT(*) FROM UIStrings WHERE Key = ?",
             (Key,)
         )
         
@@ -977,8 +977,8 @@ class DBManager:
                 self.ExecuteNonQuery(
                     """
                     UPDATE UIStrings
-                    SET en_text = ?, description = ?, context = ?
-                    WHERE key = ?
+                    SET EnText = ?, Description = ?, Context = ?
+                    WHERE Key = ?
                     """,
                     (Text, Description, Context, Key)
                 )
@@ -986,8 +986,8 @@ class DBManager:
                 self.ExecuteNonQuery(
                     """
                     UPDATE UIStrings
-                    SET en_text = ?, description = ?
-                    WHERE key = ?
+                    SET EnText = ?, Description = ?
+                    WHERE Key = ?
                     """,
                     (Text, Description, Key)
                 )
@@ -995,8 +995,8 @@ class DBManager:
                 self.ExecuteNonQuery(
                     """
                     UPDATE UIStrings
-                    SET en_text = ?, context = ?
-                    WHERE key = ?
+                    SET EnText = ?, Context = ?
+                    WHERE Key = ?
                     """,
                     (Text, Context, Key)
                 )
@@ -1004,8 +1004,8 @@ class DBManager:
                 self.ExecuteNonQuery(
                     """
                     UPDATE UIStrings
-                    SET en_text = ?
-                    WHERE key = ?
+                    SET EnText = ?
+                    WHERE Key = ?
                     """,
                     (Text, Key)
                 )
@@ -1013,7 +1013,7 @@ class DBManager:
             # Insert new string
             self.ExecuteNonQuery(
                 """
-                INSERT INTO UIStrings (key, en_text, description, context)
+                INSERT INTO UIStrings (Key, EnText, Description, Context)
                 VALUES (?, ?, ?, ?)
                 """,
                 (Key, Text, Description, Context)
@@ -1031,13 +1031,13 @@ class DBManager:
         Results = self.ExecuteQuery(
             """
             SELECT * FROM Parameters
-            ORDER BY order_index
+            ORDER BY OrderIndex
             """
         )
         
         Columns = [
-            "name", "display_name", "description", "min_value", "max_value",
-            "default_value", "step_size", "is_integer", "category", "order_index"
+            "Name", "DisplayName", "Description", "MinValue", "MaxValue",
+            "DefaultValue", "StepSize", "IsInteger", "Category", "OrderIndex"
         ]
         
         return [dict(zip(Columns, Row)) for Row in Results]
@@ -1055,15 +1055,15 @@ class DBManager:
         Results = self.ExecuteQuery(
             """
             SELECT * FROM Parameters
-            WHERE category = ?
-            ORDER BY order_index
+            WHERE Category = ?
+            ORDER BY OrderIndex
             """,
             (Category,)
         )
         
         Columns = [
-            "name", "display_name", "description", "min_value", "max_value",
-            "default_value", "step_size", "is_integer", "category", "order_index"
+            "Name", "DisplayName", "Description", "MinValue", "MaxValue",
+            "DefaultValue", "StepSize", "IsInteger", "Category", "OrderIndex"
         ]
         
         return [dict(zip(Columns, Row)) for Row in Results]
@@ -1081,7 +1081,7 @@ class DBManager:
         Results = self.ExecuteQuery(
             """
             SELECT * FROM Parameters
-            WHERE name = ?
+            WHERE Name = ?
             """,
             (Name,)
         )
@@ -1090,8 +1090,8 @@ class DBManager:
             return None
         
         Columns = [
-            "name", "display_name", "description", "min_value", "max_value",
-            "default_value", "step_size", "is_integer", "category", "order_index"
+            "Name", "DisplayName", "Description", "MinValue", "MaxValue",
+            "DefaultValue", "StepSize", "IsInteger", "Category", "OrderIndex"
         ]
         
         return dict(zip(Columns, Results[0]))
@@ -1115,9 +1115,9 @@ class DBManager:
         """
         Query = """
         INSERT INTO GenerationHistory (
-            model_name, prompt, response, temperature, top_p, max_tokens,
-            frequency_penalty, presence_penalty, input_tokens, output_tokens,
-            total_tokens, generation_time)
+            ModelName, Prompt, Response, Temperature, TopP, MaxTokens,
+            FrequencyPenalty, PresencePenalty, InputTokens, OutputTokens,
+            TotalTokens, GenerationTime)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         
@@ -1153,17 +1153,17 @@ class DBManager:
         Results = self.ExecuteQuery(
             """
             SELECT * FROM GenerationHistory
-            ORDER BY created_at DESC
+            ORDER BY CreatedAt DESC
             LIMIT ? OFFSET ?
             """,
             (Limit, Offset)
         )
         
         Columns = [
-            "id", "model_name", "prompt", "response", "temperature",
-            "top_p", "max_tokens", "frequency_penalty", "presence_penalty",
-            "input_tokens", "output_tokens", "total_tokens",
-            "generation_time", "created_at"
+            "ID", "ModelName", "Prompt", "Response", "Temperature",
+            "TopP", "MaxTokens", "FrequencyPenalty", "PresencePenalty",
+            "InputTokens", "OutputTokens", "TotalTokens",
+            "GenerationTime", "CreatedAt"
         ]
         
         return [dict(zip(Columns, Row)) for Row in Results]
@@ -1183,18 +1183,18 @@ class DBManager:
         Results = self.ExecuteQuery(
             """
             SELECT * FROM GenerationHistory
-            WHERE model_name = ?
-            ORDER BY created_at DESC
+            WHERE ModelName = ?
+            ORDER BY CreatedAt DESC
             LIMIT ? OFFSET ?
             """,
             (ModelName, Limit, Offset)
         )
         
         Columns = [
-            "id", "model_name", "prompt", "response", "temperature",
-            "top_p", "max_tokens", "frequency_penalty", "presence_penalty",
-            "input_tokens", "output_tokens", "total_tokens",
-            "generation_time", "created_at"
+            "ID", "ModelName", "Prompt", "Response", "Temperature",
+            "TopP", "MaxTokens", "FrequencyPenalty", "PresencePenalty",
+            "InputTokens", "OutputTokens", "TotalTokens",
+            "GenerationTime", "CreatedAt"
         ]
         
         return [dict(zip(Columns, Row)) for Row in Results]
@@ -1234,8 +1234,8 @@ class DBManager:
         
         Query = """
         INSERT INTO BenchmarkResults (
-            benchmark_name, model_name, config_id, prompt,
-            average_time, average_tokens, average_tokens_per_second, runs)
+            BenchmarkName, ModelName, ConfigID, Prompt,
+            AverageTime, AverageTokens, AverageTokensPerSecond, Runs)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
         
@@ -1266,31 +1266,31 @@ class DBManager:
         if ModelName:
             Results = self.ExecuteQuery(
                 """
-                SELECT b.*, c.temperature, c.top_p, c.max_tokens, 
-                       c.frequency_penalty, c.presence_penalty
+                SELECT b.*, c.Temperature, c.TopP, c.MaxTokens, 
+                       c.FrequencyPenalty, c.PresencePenalty
                 FROM BenchmarkResults b
-                JOIN ModelConfigs c ON b.config_id = c.id
-                WHERE b.model_name = ?
-                ORDER BY b.created_at DESC
+                JOIN ModelConfigs c ON b.ConfigID = c.ID
+                WHERE b.ModelName = ?
+                ORDER BY b.CreatedAt DESC
                 """,
                 (ModelName,)
             )
         else:
             Results = self.ExecuteQuery(
                 """
-                SELECT b.*, c.temperature, c.top_p, c.max_tokens, 
-                       c.frequency_penalty, c.presence_penalty
+                SELECT b.*, c.Temperature, c.TopP, c.MaxTokens, 
+                       c.FrequencyPenalty, c.PresencePenalty
                 FROM BenchmarkResults b
-                JOIN ModelConfigs c ON b.config_id = c.id
-                ORDER BY b.created_at DESC
+                JOIN ModelConfigs c ON b.ConfigID = c.ID
+                ORDER BY b.CreatedAt DESC
                 """
             )
         
         Columns = [
-            "id", "benchmark_name", "model_name", "config_id", "prompt",
-            "average_time", "average_tokens", "average_tokens_per_second", "runs",
-            "created_at", "temperature", "top_p", "max_tokens",
-            "frequency_penalty", "presence_penalty"
+            "ID", "BenchmarkName", "ModelName", "ConfigID", "Prompt",
+            "AverageTime", "AverageTokens", "AverageTokensPerSecond", "Runs",
+            "CreatedAt", "Temperature", "TopP", "MaxTokens",
+            "FrequencyPenalty", "PresencePenalty"
         ]
         
         return [dict(zip(Columns, Row)) for Row in Results]

@@ -2,7 +2,7 @@
 # Path: OllamaModelEditor/Core/ConfigManager.py
 # Standard: AIDEV-PascalCase-1.2
 # Created: 2025-03-11
-# Last Modified: 2025-03-12 05:15PM
+# Last Modified: 2025-03-12 09:30PM
 # Description: Configuration management for the OllamaModelEditor application
 
 import os
@@ -10,6 +10,7 @@ import json
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional, Union
+import logging
 
 # Import DBManager if available
 try:
@@ -28,6 +29,7 @@ class ConfigManager:
             ConfigPath: Optional path to configuration file
             DB: Optional database manager instance
         """
+        self.Logger = logging.getLogger('OllamaModelEditor.ConfigManager')
         self.ConfigPath = ConfigPath
         self.DB = DB
         self.AppConfig = {}
@@ -52,12 +54,12 @@ class ConfigManager:
         if os.name == 'nt':  # Windows
             ConfigDir = HomeDir / 'AppData' / 'Local' / 'OllamaModelEditor'
         else:  # macOS and Linux
-            ConfigDir = HomeDir / '.config' / 'ollamaModelEditor'
+            ConfigDir = HomeDir / '.config' / 'OllamaModelEditor'
         
         # Create directory if it doesn't exist
         ConfigDir.mkdir(parents=True, exist_ok=True)
         
-        return str(ConfigDir / 'config.yaml')
+        return str(ConfigDir / 'Config.yaml')
     
     def LoadConfig(self) -> bool:
         """
@@ -78,10 +80,11 @@ class ConfigManager:
                 # Load model configs from database
                 self._LoadModelConfigsFromDB()
                 
+                self.Logger.info("Configuration loaded from database")
                 return True
             
             except Exception as Error:
-                print(f"Error loading configuration from database: {Error}")
+                self.Logger.error(f"Error loading configuration from database: {Error}")
                 # Fall back to file-based configuration
         
         # File-based configuration loading
@@ -101,7 +104,7 @@ class ConfigManager:
                 with open(ConfigPath, 'r') as ConfigFile:
                     ConfigData = yaml.safe_load(ConfigFile)
             else:
-                print(f"Unsupported configuration file format: {ConfigPath.suffix}")
+                self.Logger.error(f"Unsupported configuration file format: {ConfigPath.suffix}")
                 return False
             
             # Parse configuration sections
@@ -109,10 +112,11 @@ class ConfigManager:
             self.ModelConfigs = ConfigData.get('ModelConfigs', {})
             self.UserPreferences = ConfigData.get('UserPreferences', {})
             
+            self.Logger.info(f"Configuration loaded from file: {ConfigPath}")
             return True
             
         except Exception as Error:
-            print(f"Error loading configuration: {Error}")
+            self.Logger.error(f"Error loading configuration: {Error}")
             # Create default configuration on error
             self._CreateDefaultConfig()
             return False
@@ -121,7 +125,7 @@ class ConfigManager:
         """Load application configuration from database."""
         # Get all app settings
         Settings = self.DB.ExecuteQuery(
-            "SELECT key, value, value_type FROM AppSettings"
+            "SELECT Key, Value, ValueType FROM AppSettings"
         )
         
         # Clear existing app config
@@ -144,7 +148,7 @@ class ConfigManager:
         """Load user preferences from database."""
         # Get all user preferences
         Preferences = self.DB.ExecuteQuery(
-            "SELECT key, value, value_type FROM UserPreferences"
+            "SELECT Key, Value, ValueType FROM UserPreferences"
         )
         
         # Clear existing preferences
@@ -168,8 +172,8 @@ class ConfigManager:
         # Get all model configurations
         ModelConfigs = self.DB.ExecuteQuery(
             """
-            SELECT model_name, config_name, temperature, top_p, max_tokens,
-                   frequency_penalty, presence_penalty
+            SELECT ModelName, ConfigName, Temperature, TopP, MaxTokens,
+                   FrequencyPenalty, PresencePenalty
             FROM ModelConfigs
             """
         )
@@ -213,10 +217,11 @@ class ConfigManager:
                 # Save model configs to database (handled by ModelManager)
                 # We don't save model configs here to avoid overwriting changes
                 
+                self.Logger.info("Configuration saved to database")
                 return True
             
             except Exception as Error:
-                print(f"Error saving configuration to database: {Error}")
+                self.Logger.error(f"Error saving configuration to database: {Error}")
                 # Fall back to file-based saving
         
         # File-based configuration saving
@@ -241,13 +246,14 @@ class ConfigManager:
                 with open(ConfigPath, 'w') as ConfigFile:
                     yaml.dump(ConfigData, ConfigFile, default_flow_style=False)
             else:
-                print(f"Unsupported configuration file format: {ConfigPath.suffix}")
+                self.Logger.error(f"Unsupported configuration file format: {ConfigPath.suffix}")
                 return False
             
+            self.Logger.info(f"Configuration saved to file: {ConfigPath}")
             return True
             
         except Exception as Error:
-            print(f"Error saving configuration: {Error}")
+            self.Logger.error(f"Error saving configuration: {Error}")
             return False
     
     def _CreateDefaultConfig(self) -> None:
@@ -293,9 +299,12 @@ class ConfigManager:
             # Save default parameters
             DefaultParams = self.ModelConfigs['DefaultParameters']
             self.DB.SaveModelConfig('DefaultParameters', 'Default', DefaultParams)
+            
+            self.Logger.info("Default configuration created and saved to database")
         else:
             # Save to file
             self.SaveConfig()
+            self.Logger.info("Default configuration created and saved to file")
     
     def GetAppConfig(self, Key: Optional[str] = None, Default: Any = None) -> Any:
         """
@@ -348,11 +357,11 @@ class ConfigManager:
             Config = self.DB.GetModelConfig(ModelName)
             if Config:
                 return {
-                    'Temperature': Config['temperature'],
-                    'TopP': Config['top_p'],
-                    'MaxTokens': Config['max_tokens'],
-                    'FrequencyPenalty': Config['frequency_penalty'],
-                    'PresencePenalty': Config['presence_penalty']
+                    'Temperature': Config['Temperature'],
+                    'TopP': Config['TopP'],
+                    'MaxTokens': Config['MaxTokens'],
+                    'FrequencyPenalty': Config['FrequencyPenalty'],
+                    'PresencePenalty': Config['PresencePenalty']
                 }
         
         # Fall back to memory cache
@@ -445,7 +454,7 @@ class ConfigManager:
             ModelConfig = self.GetModelConfig(ModelName)
             
             if not ModelConfig:
-                print(f"No configuration found for model: {ModelName}")
+                self.Logger.error(f"No configuration found for model: {ModelName}")
                 return False
             
             # Ensure export directory exists
@@ -461,13 +470,14 @@ class ConfigManager:
                 with open(FilePath, 'w') as ExportFile:
                     yaml.dump(ModelConfig, ExportFile, default_flow_style=False)
             else:
-                print(f"Unsupported export format: {FileExt}")
+                self.Logger.error(f"Unsupported export format: {FileExt}")
                 return False
             
+            self.Logger.info(f"Model configuration exported to: {FilePath}")
             return True
             
         except Exception as Error:
-            print(f"Error exporting model configuration: {Error}")
+            self.Logger.error(f"Error exporting model configuration: {Error}")
             return False
     
     def ImportModelConfig(self, ModelName: str, FilePath: str) -> bool:
@@ -485,7 +495,7 @@ class ConfigManager:
             # Check if file exists
             ConfigFile = Path(FilePath)
             if not ConfigFile.exists():
-                print(f"Configuration file not found: {FilePath}")
+                self.Logger.error(f"Configuration file not found: {FilePath}")
                 return False
             
             # Import based on file extension
@@ -498,12 +508,12 @@ class ConfigManager:
                 with open(FilePath, 'r') as ImportFile:
                     ModelConfig = yaml.safe_load(ImportFile)
             else:
-                print(f"Unsupported import format: {FileExt}")
+                self.Logger.error(f"Unsupported import format: {FileExt}")
                 return False
             
             # Validate imported configuration
             if not self._ValidateModelConfig(ModelConfig):
-                print("Invalid model configuration format")
+                self.Logger.error("Invalid model configuration format")
                 return False
             
             # Set model configuration
@@ -512,10 +522,11 @@ class ConfigManager:
             # Add to recent models
             self.AddRecentModel(ModelName)
             
+            self.Logger.info(f"Model configuration imported from: {FilePath}")
             return True
             
         except Exception as Error:
-            print(f"Error importing model configuration: {Error}")
+            self.Logger.error(f"Error importing model configuration: {Error}")
             return False
     
     def _ValidateModelConfig(self, Config: Dict[str, Any]) -> bool:
@@ -534,20 +545,20 @@ class ConfigManager:
         # Check if all required parameters exist
         for Param in RequiredParams:
             if Param not in Config:
-                print(f"Missing required parameter: {Param}")
+                self.Logger.error(f"Missing required parameter: {Param}")
                 return False
         
         # Validate parameter types and ranges
         if not isinstance(Config.get('Temperature'), (int, float)) or not 0 <= Config.get('Temperature') <= 2:
-            print("Temperature must be a number between 0 and 2")
+            self.Logger.error("Temperature must be a number between 0 and 2")
             return False
         
         if not isinstance(Config.get('TopP'), (int, float)) or not 0 <= Config.get('TopP') <= 1:
-            print("TopP must be a number between 0 and 1")
+            self.Logger.error("TopP must be a number between 0 and 1")
             return False
         
         if not isinstance(Config.get('MaxTokens'), int) or Config.get('MaxTokens') <= 0:
-            print("MaxTokens must be a positive integer")
+            self.Logger.error("MaxTokens must be a positive integer")
             return False
         
         return True
@@ -563,7 +574,7 @@ class ConfigManager:
             bool: True if migration successful, False otherwise
         """
         if not DB:
-            print("No database manager provided")
+            self.Logger.error("No database manager provided")
             return False
         
         try:
@@ -574,17 +585,17 @@ class ConfigManager:
             self.DB = DB
             
             # Migrate application settings
-            print("Migrating application settings...")
+            self.Logger.info("Migrating application settings...")
             for Key, Value in self.AppConfig.items():
                 DB.SetAppSetting(Key, Value)
             
             # Migrate user preferences
-            print("Migrating user preferences...")
+            self.Logger.info("Migrating user preferences...")
             for Key, Value in self.UserPreferences.items():
                 DB.SetUserPreference(Key, Value)
             
             # Migrate model configurations
-            print("Migrating model configurations...")
+            self.Logger.info("Migrating model configurations...")
             for ModelName, ModelConfig in self.ModelConfigs.items():
                 if isinstance(ModelConfig, dict) and not isinstance(list(ModelConfig.values())[0], dict):
                     # This is a single configuration (not a dict of configs)
@@ -594,9 +605,9 @@ class ConfigManager:
                     for ConfigName, ConfigParams in ModelConfig.items():
                         DB.SaveModelConfig(ModelName, ConfigName, ConfigParams)
             
-            print("Migration to database completed successfully")
+            self.Logger.info("Migration to database completed successfully")
             return True
             
         except Exception as Error:
-            print(f"Error migrating to database: {Error}")
+            self.Logger.error(f"Error migrating to database: {Error}")
             return False
