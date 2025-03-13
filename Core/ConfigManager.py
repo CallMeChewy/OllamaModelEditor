@@ -2,14 +2,14 @@
 # Path: OllamaModelEditor/Core/ConfigManager.py
 # Standard: AIDEV-PascalCase-1.2
 # Created: 2025-03-11
-# Last Modified: 2025-03-12 09:30PM
+# Last Modified: 2025-03-13
 # Description: Configuration management for the OllamaModelEditor application
 
 import os
 import json
 import yaml
 from pathlib import Path
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, List
 import logging
 
 # Import DBManager if available
@@ -61,6 +61,89 @@ class ConfigManager:
         
         return str(ConfigDir / 'Config.yaml')
     
+    def _SerializeQtObjects(self, Config: Dict) -> Dict:
+        """
+        Convert Qt objects to serializable format.
+        
+        Args:
+            Config: Configuration dictionary
+            
+        Returns:
+            Dictionary with serialized Qt objects
+        """
+        SerializedConfig = {}
+        
+        for Key, Value in Config.items():
+            if hasattr(Value, '__class__') and Value.__class__.__module__.startswith('PySide6'):
+                # Handle QByteArray
+                if Value.__class__.__name__ == 'QByteArray':
+                    SerializedConfig[Key] = {'__qt_type__': 'QByteArray', 'data': bytes(Value).hex()}
+                # Handle QSize
+                elif Value.__class__.__name__ == 'QSize':
+                    SerializedConfig[Key] = {'__qt_type__': 'QSize', 'width': Value.width(), 'height': Value.height()}
+                # Handle QRect
+                elif Value.__class__.__name__ == 'QRect':
+                    SerializedConfig[Key] = {
+                        '__qt_type__': 'QRect', 
+                        'x': Value.x(), 
+                        'y': Value.y(),
+                        'width': Value.width(), 
+                        'height': Value.height()
+                    }
+                # Handle QPoint
+                elif Value.__class__.__name__ == 'QPoint':
+                    SerializedConfig[Key] = {'__qt_type__': 'QPoint', 'x': Value.x(), 'y': Value.y()}
+                # Other Qt objects - store class name and basic representation
+                else:
+                    SerializedConfig[Key] = {
+                        '__qt_type__': Value.__class__.__name__,
+                        'repr': repr(Value)
+                    }
+            elif isinstance(Value, dict):
+                SerializedConfig[Key] = self._SerializeQtObjects(Value)
+            else:
+                SerializedConfig[Key] = Value
+                
+        return SerializedConfig
+    
+    def _DeserializeQtObjects(self, Config: Dict) -> Dict:
+        """
+        Convert serialized Qt objects back to their original form.
+        
+        Args:
+            Config: Configuration dictionary with serialized Qt objects
+            
+        Returns:
+            Dictionary with deserialized Qt objects
+        """
+        from PySide6.QtCore import QByteArray, QSize, QRect, QPoint
+        
+        DeserializedConfig = {}
+        
+        for Key, Value in Config.items():
+            if isinstance(Value, dict) and '__qt_type__' in Value:
+                # Reconstruct Qt objects based on type
+                QtType = Value['__qt_type__']
+                
+                if QtType == 'QByteArray':
+                    DeserializedConfig[Key] = QByteArray.fromHex(bytes.fromhex(Value['data']))
+                elif QtType == 'QSize':
+                    DeserializedConfig[Key] = QSize(Value['width'], Value['height'])
+                elif QtType == 'QRect':
+                    DeserializedConfig[Key] = QRect(Value['x'], Value['y'], Value['width'], Value['height'])
+                elif QtType == 'QPoint':
+                    DeserializedConfig[Key] = QPoint(Value['x'], Value['y'])
+                else:
+                    # For other Qt objects, we can't fully reconstruct them
+                    # So we'll keep them as dictionaries with their type information
+                    DeserializedConfig[Key] = Value
+            elif isinstance(Value, dict):
+                DeserializedConfig[Key] = self._DeserializeQtObjects(Value)
+            else:
+                DeserializedConfig[Key] = Value
+                
+        return DeserializedConfig
+    
     def LoadConfig(self) -> bool:
         """
         Load configuration from file.
@@ -108,9 +191,14 @@ class ConfigManager:
                 return False
             
             # Parse configuration sections
-            self.AppConfig = ConfigData.get('AppConfig', {})
-            self.ModelConfigs = ConfigData.get('ModelConfigs', {})
-            self.UserPreferences = ConfigData.get('UserPreferences', {})
+            if 'AppConfig' in ConfigData:
+                self.AppConfig = self._DeserializeQtObjects(ConfigData.get('AppConfig', {}))
+            
+            if 'ModelConfigs' in ConfigData:
+                self.ModelConfigs = self._DeserializeQtObjects(ConfigData.get('ModelConfigs', {}))
+            
+            if 'UserPreferences' in ConfigData:
+                self.UserPreferences = self._DeserializeQtObjects(ConfigData.get('UserPreferences', {}))
             
             self.Logger.info(f"Configuration loaded from file: {ConfigPath}")
             return True
@@ -230,9 +318,9 @@ class ConfigManager:
             
             # Prepare configuration data
             ConfigData = {
-                'AppConfig': self.AppConfig,
-                'ModelConfigs': self.ModelConfigs,
-                'UserPreferences': self.UserPreferences
+                'AppConfig': self._SerializeQtObjects(self.AppConfig),
+                'ModelConfigs': self._SerializeQtObjects(self.ModelConfigs),
+                'UserPreferences': self._SerializeQtObjects(self.UserPreferences)
             }
             
             # Create directory if it doesn't exist
